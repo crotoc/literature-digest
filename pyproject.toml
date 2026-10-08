@@ -16,6 +16,7 @@ dependencies = [
     "pymysql>=1.1",
     "cryptography>=43.0",
     "pyyaml>=6.0",
+    "pypdf>=5.1",
 ]
 
 [project.optional-dependencies]
