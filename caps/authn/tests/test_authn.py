@@ -109,6 +109,10 @@ class TestMalformedHash:
             "$2b$12$abcdefghijklmnopqrstuv",
             "$argon2id$truncated",
             "not even close",
+            # 非 ASCII 的坏数据：argon2-cffi 在编码阶段就炸，必须在本模块
+            # 收成 MalformedHash，否则一行坏数据会变成一个 500
+            "库里存的是明文",
+            "$argon2id$v=19$m=8,t=1,p=1$盐$哈希",
         ],
     )
     def test_raises_not_returns_false(self, bad):
@@ -121,6 +125,11 @@ class TestMalformedHash:
         assert check_password(stored, "wrong", params=FAST).ok is False
         with pytest.raises(MalformedHash):
             check_password("garbage", "wrong", params=FAST)
+
+    @pytest.mark.parametrize("bad", [None, 123, b"", object()])
+    def test_non_string_hash_raises_malformed(self, bad):
+        with pytest.raises(MalformedHash):
+            check_password(bad, "pw", params=FAST)
 
     def test_impossible_params_raise_hashing_failed(self):
         with pytest.raises((HashingFailed, ValueError)):

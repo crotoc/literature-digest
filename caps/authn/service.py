@@ -139,6 +139,11 @@ def check_password(
         # argon2 认得这个哈希的格式，但校验没通过且不是"不匹配"——
         # 当成数据问题而不是密码问题，同样别悄悄吞掉
         raise MalformedHash(str(error)) from error
+    except (UnicodeEncodeError, TypeError, AttributeError) as error:
+        # argon2-cffi 在把哈希串编成 ascii 时就会炸（库里存了中文、
+        # 存了 None、编码被弄坏……）。这类异常必须在这里收成 MalformedHash，
+        # 否则一行坏数据会变成一个 500 而不是一条可读的错误。
+        raise MalformedHash(f"{type(error).__name__}: {error}") from error
     return PasswordCheck(ok=True, needs_rehash=hasher.check_needs_rehash(stored_hash))
 
 
