@@ -272,8 +272,12 @@ class TestNewToken:
         assert len({new_token().plaintext for _ in range(200)}) == 200
 
     def test_no_prefix(self):
+        # 没给 prefix 时不应该拼出 "_<body>" 这种带前导下划线的形状（那是
+        # prefix 拼接逻辑的产物，不是 token_urlsafe 本身的字符）。
+        # 注意：token_urlsafe 的字母表本身含 "_"，所以不能断言首字符不是
+        # "_"——那是真随机的，断言过会是个 flaky test（本次全量跑就撞上了）。
         token = new_token()
-        assert "_" not in token.plaintext[:1]
+        assert not token.plaintext.startswith("__")
         assert len(token.lookup_prefix) == LOOKUP_PREFIX_CHARS
 
     def test_lookup_prefix_recoverable_from_presented_token(self):
