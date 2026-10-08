@@ -1,0 +1,41 @@
+"""caps/redact 的对外表面。外部只许 import 这里的东西。"""
+
+from caps.redact.service import (
+    CYCLE,
+    DEFAULT_MAX_DEPTH,
+    DEFAULT_POLICY,
+    MIN_KNOWN_VALUE_LENGTH,
+    PLACEHOLDER,
+    SENSITIVE_KEY_NAMES,
+    SENSITIVE_KEY_SUBSTRINGS,
+    TOO_DEEP,
+    URL_KEY_NAMES,
+    RedactionPolicy,
+    is_sensitive_key,
+    is_url_key,
+    normalize_key,
+    redact_mapping,
+    redact_text,
+    redact_url,
+    with_known_values,
+)
+
+__all__ = [
+    "CYCLE",
+    "DEFAULT_MAX_DEPTH",
+    "DEFAULT_POLICY",
+    "MIN_KNOWN_VALUE_LENGTH",
+    "PLACEHOLDER",
+    "SENSITIVE_KEY_NAMES",
+    "SENSITIVE_KEY_SUBSTRINGS",
+    "TOO_DEEP",
+    "URL_KEY_NAMES",
+    "RedactionPolicy",
+    "is_sensitive_key",
+    "is_url_key",
+    "normalize_key",
+    "redact_mapping",
+    "redact_text",
+    "redact_url",
+    "with_known_values",
+]
