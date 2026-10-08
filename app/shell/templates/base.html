@@ -1,0 +1,21 @@
+{# 规避清单 #4：container_class 从第一天就是可覆盖的 block，不要写死。 #}
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}literature-digest{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/2.0.4/htmx.min.js" defer></script>
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+  {% block nav %}
+    {% include "_nav.html" %}
+  {% endblock %}
+  <main class="{% block container_class %}container{% endblock %}">
+    {% block content %}{% endblock %}
+  </main>
+  {% block body_end %}{% endblock %}
+</body>
+</html>

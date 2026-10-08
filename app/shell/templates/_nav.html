@@ -1,0 +1,6 @@
+<nav class="nav">
+  <span class="nav-brand">literature-digest</span>
+  {% for item in nav_items %}
+    <a class="nav-link{% if item.key == active_nav %} is-active{% endif %}" href="{{ item.path }}">{{ item.label }}</a>
+  {% endfor %}
+</nav>

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}状态 · literature-digest{% endblock %}
+{# 覆盖 container_class，验证 block 真的可覆盖 #}
+{% block container_class %}container-wide{% endblock %}
+{% block content %}
+  <h1>骨架就位</h1>
+  <p class="muted">页面注册表发现了 {{ nav_items | length }} 个页面。</p>
+  <ul>
+    {% for item in nav_items %}<li><code>{{ item.key }}</code> → {{ item.path }}</li>{% endfor %}
+  </ul>
+{% endblock %}

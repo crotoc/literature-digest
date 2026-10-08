@@ -1,0 +1,6 @@
+adapters
+app
+caps
+domain
+features
+infra
