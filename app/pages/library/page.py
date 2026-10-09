@@ -1,16 +1,16 @@
-"""app/pages/library：文献库卷目列表 + 删除/回收站恢复 + 单篇打标签/笔记。
+"""app/pages/library：文献库卷目列表 + 删除/回收站恢复 + 单篇打标签/笔记/元数据编辑。
 
 v1 范围的刻意裁剪：读路径接 features/library_browse 的
 list_library_page()——按 view(all/trash) + 排序 + 分页浏览卡片列表。
 写路径目前只接 features/organizing 的单项操作（work_ids=[单个 id]）：
 软删/恢复、"顺手新建标签再打上"、去掉某一个标签；外加 features/annotating
 的笔记读写（list_library_page 的 LibraryCard 已经带了 note 字段，省了
-一次额外查询）。标签侧栏 AND 筛选、文件夹筛选、三态勾选/全选所有筛选
-结果、批量打标签/移文件夹、彻底删除、元数据编辑、附件上传/预览这些全部
+一次额外查询）和标量元数据编辑（标题/年份/期刊或书名/摘要，authors 等
+结构化字段不在内）。标签侧栏 AND 筛选、文件夹筛选、三态勾选/全选所有
+筛选结果、批量打标签/移文件夹/编辑、彻底删除、附件上传/预览这些全部
 留给后续增量——批量操作要先有"选择集"这个前端状态才有意义,而「两处已定」
 第 2 条明确选择集的服务端解析是独立的一块,不该现在就为了这几个按钮囫囵
-顺带做了;元数据编辑是 features/annotating 的另一半能力,和笔记不是同一个
-UI 决策,拆成单独一个增量。
+顺带做了。
 
 URL 用 `/l/<name-slug>-<id>/`——只认尾部数字 id，slug 前缀纯装饰，不校验
 是否和库名匹配（库改名后旧链接依然能打开，不需要重定向）。
@@ -28,7 +28,7 @@ from caps.slug import slugify
 from domain.accounts import AccountDTO
 from domain.libraries import LibraryDTO, LibraryNotFound, list_libraries_for_account, resolve_scope
 from domain.works import WorkNotFound, get_work
-from features.annotating import set_work_note
+from features.annotating import set_work_note, update_metadata
 from features.library_browse import (
     DEFAULT_PAGE_SIZE,
     DEFAULT_SORT_BY,
@@ -245,4 +245,50 @@ def save_note_route(
     # content=None 即删除；这里把"用户把文本框清空再保存"自然映射过去，
     # 不需要单独一个"删除笔记"按钮。
     set_work_note(session, library_id=library_id, work_id=work_id, content=content.strip() or None)
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+@router.post("/l/{slug_and_id}/works/{work_id}/edit")
+def edit_metadata_route(
+    slug_and_id: str,
+    work_id: int,
+    title: str = Form(""),
+    year: str = Form(""),
+    container_title: str = Form(""),
+    abstract: str = Form(""),
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    _require_work_in_library(session, library_id, work_id)
+
+    year_text = year.strip()
+    if not year_text:
+        year_value = None
+    elif year_text.isdigit():
+        year_value = int(year_text)
+    else:
+        raise HTTPException(status_code=400, detail="年份必须是数字")
+
+    # update_metadata 用 _UNSET 哨兵区分"没传"和"传了 None"——这里四个
+    # 字段永远一起传（哪怕没变），就不需要先比对旧值再决定传不传，代价是
+    # 每次保存都等价于"全量覆盖这四个字段"，比"只传真正变了的字段"简单，
+    # 够用。authors/identifiers 等其余字段这个表单不碰，留给再下一个增量
+    # （authors 是结构化列表，牵扯另一套输入设计，不该和这四个标量字段
+    # 混在一个决策里）。
+    update_metadata(
+        session,
+        library_id=library_id,
+        work_id=work_id,
+        title=title.strip() or None,
+        year=year_value,
+        container_title=container_title.strip() or None,
+        abstract=abstract.strip() or None,
+    )
     return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)

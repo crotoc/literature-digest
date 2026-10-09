@@ -43,6 +43,25 @@
           {% if card.work.year %} · {{ card.work.year }}{% endif %}
           {% if card.work.container_title %} · {{ card.work.container_title }}{% endif %}
         </p>
+        <details class="edit-details">
+          <summary>编辑元数据</summary>
+          <form method="post" class="edit-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/edit">
+            {{ hidden_state() }}
+            <label>标题
+              <input type="text" name="title" value="{{ card.work.title or '' }}">
+            </label>
+            <label>年份
+              <input type="text" name="year" value="{{ card.work.year or '' }}" inputmode="numeric">
+            </label>
+            <label>期刊/书名
+              <input type="text" name="container_title" value="{{ card.work.container_title or '' }}">
+            </label>
+            <label>摘要
+              <textarea name="abstract" rows="3">{{ card.work.abstract or "" }}</textarea>
+            </label>
+            <button type="submit" class="btn">保存元数据</button>
+          </form>
+        </details>
         <p class="work-tags">
           {% for tag in card.tags %}
             <span class="tag-chip">

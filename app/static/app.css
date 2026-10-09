@@ -103,3 +103,13 @@ code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em
   background: var(--bg); color: var(--fg); font: inherit; resize: vertical;
 }
 .note-form button { align-self: flex-start; }
+
+.edit-details { margin-top: 0.5rem; }
+.edit-details summary { cursor: pointer; color: var(--muted); }
+.edit-form { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; max-width: 32rem; }
+.edit-form label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.9em; color: var(--muted); }
+.edit-form input, .edit-form textarea {
+  padding: 0.4rem; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg); color: var(--fg); font: inherit; resize: vertical;
+}
+.edit-form button { align-self: flex-start; }

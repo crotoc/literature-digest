@@ -285,3 +285,84 @@ def test_save_note_rejects_work_id_from_another_library(client):
     client.post("/login", data={"username_or_email": "yuki", "password": PASSWORD})
     check_response = client.get(yuki_library_url)
     assert "越权写入" not in check_response.text
+
+
+# ── 编辑元数据 ───────────────────────────────────────────────────────────
+
+
+def test_edit_metadata_updates_title_year_container_and_abstract(client):
+    _register(client, username="abel", email="abel@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{library_url}works/{work_id}/edit",
+        data={
+            "title": "A Renamed Paper",
+            "year": "1999",
+            "container_title": "Journal of Testing",
+            "abstract": "一段新的摘要",
+            "view": "all",
+            "sort_by": "updated_at",
+            "sort_dir": "desc",
+            "page": "1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "A Renamed Paper" in response.text
+    assert "1999" in response.text
+    assert "Journal of Testing" in response.text
+    assert "一段新的摘要" in response.text
+    assert "A Sample Paper" not in response.text
+
+
+def test_edit_metadata_rejects_non_numeric_year(client):
+    _register(client, username="brad", email="brad@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{library_url}works/{work_id}/edit",
+        data={"title": "whatever", "year": "not-a-year", "view": "all"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_edit_metadata_requires_login(client):
+    _register(client, username="cora", email="cora@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    response = client.post(f"{library_url}works/{work_id}/edit", data={"title": "不该成功"})
+
+    assert str(response.url).endswith("/login")
+
+
+def test_edit_metadata_rejects_work_id_from_another_library(client):
+    _register(client, username="dina", email="dina@example.org")
+    dina_work_id = _import_sample(client)
+    dina_lib_response = client.get("/library")
+    dina_library_url = str(dina_lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    _register(client, username="ezra", email="ezra@example.org")
+    ezra_lib_response = client.get("/library")
+    ezra_library_url = str(ezra_lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{ezra_library_url}works/{dina_work_id}/edit",
+        data={"title": "越权改写标题", "view": "all"},
+    )
+    assert response.status_code == 404
+
+    client.post("/logout")
+    client.post("/login", data={"username_or_email": "dina", "password": PASSWORD})
+    check_response = client.get(dina_library_url)
+    assert "越权改写标题" not in check_response.text
+    assert "A Sample Paper" in check_response.text
