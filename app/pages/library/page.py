@@ -83,6 +83,12 @@ failed outcome、不中断其余项、不抛到页面层，和 `features/dedupe_
 下载）。`set_main_attachment` 同样只认 `attachment_id`、不核对
 `library_id`，复用已有的 `_require_attachment_in_library` 补上这道检查。
 
+卡片上的摘要展示（计划「⑤ 单篇操作」"摘要显示"）和"编辑元数据"是两个
+独立的点：后者此前已经做了（textarea 默认值回显），但折叠起来的编辑
+表单不适合当成"随手展开读一下摘要"的入口，所以模板层补了一个只读的
+`<details class="abstract-details">` 块，有摘要才渲染，纯展示不新增
+路由（`card.work.abstract` 已经在 `list_library_page` 的 DTO 里）。
+
 URL 用 `/l/<name-slug>-<id>/`——只认尾部数字 id，slug 前缀纯装饰，不校验
 是否和库名匹配（库改名后旧链接依然能打开，不需要重定向）。
 """

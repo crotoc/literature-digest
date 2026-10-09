@@ -427,7 +427,36 @@ def test_edit_metadata_updates_title_year_container_and_abstract(client):
     assert "1999" in response.text
     assert "Journal of Testing" in response.text
     assert "一段新的摘要" in response.text
+    assert '<p class="muted">一段新的摘要</p>' in response.text
     assert "A Sample Paper" not in response.text
+
+
+def test_work_card_shows_abstract_when_present_and_hides_block_when_absent(client):
+    _register(client, username="abstractreader", email="abstractreader@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    before_response = client.get(library_url)
+    assert "abstract-details" not in before_response.text
+
+    client.post(
+        f"{library_url}works/{work_id}/edit",
+        data={
+            "title": "",
+            "year": "",
+            "container_title": "",
+            "abstract": "可展开阅读的摘要正文",
+            "view": "all",
+            "sort_by": "updated_at",
+            "sort_dir": "desc",
+            "page": "1",
+        },
+    )
+
+    after_response = client.get(library_url)
+    assert "abstract-details" in after_response.text
+    assert "可展开阅读的摘要正文" in after_response.text
 
 
 def test_edit_metadata_rejects_non_numeric_year(client):

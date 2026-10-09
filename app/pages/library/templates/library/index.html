@@ -161,6 +161,12 @@
           {% if card.work.year %} · {{ card.work.year }}{% endif %}
           {% if card.work.container_title %} · {{ card.work.container_title }}{% endif %}
         </p>
+        {% if card.work.abstract %}
+          <details class="abstract-details">
+            <summary>摘要</summary>
+            <p class="muted">{{ card.work.abstract }}</p>
+          </details>
+        {% endif %}
         <details class="edit-details">
           <summary>编辑元数据</summary>
           <form method="post" class="edit-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/edit">

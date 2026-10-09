@@ -104,6 +104,9 @@ code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em
 }
 .note-form button { align-self: flex-start; }
 
+.abstract-details { margin-top: 0.5rem; }
+.abstract-details summary { cursor: pointer; color: var(--muted); }
+
 .edit-details { margin-top: 0.5rem; }
 .edit-details summary { cursor: pointer; color: var(--muted); }
 .edit-form { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; max-width: 32rem; }
