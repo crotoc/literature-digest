@@ -48,6 +48,14 @@
           </p>
         {% endif %}
         <p class="muted">{{ card.attachments | length }} 个附件{% if card.note %} · 有笔记{% endif %}</p>
+        <form method="post" class="work-actions"
+              action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/{{ 'restore' if view == 'trash' else 'delete' }}">
+          <input type="hidden" name="view" value="{{ view }}">
+          <input type="hidden" name="sort_by" value="{{ sort_by }}">
+          <input type="hidden" name="sort_dir" value="{{ sort_dir }}">
+          <input type="hidden" name="page" value="{{ page }}">
+          <button type="submit" class="btn">{{ "恢复" if view == "trash" else "移入回收站" }}</button>
+        </form>
       </li>
     {% endfor %}
   </ul>

@@ -81,3 +81,5 @@ code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em
 .counts-table { border-collapse: collapse; margin: 1rem 0; }
 .counts-table td { padding: 0.25rem 1rem 0.25rem 0; }
 .outcome-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+
+.work-actions { margin-top: 0.5rem; }

@@ -1,12 +1,13 @@
-"""app/pages/library：文献库卷目列表（只读）。
+"""app/pages/library：文献库卷目列表 + 删除/回收站恢复。
 
-v1 范围的刻意裁剪：本增量只接 features/library_browse 的
+v1 范围的刻意裁剪：读路径接 features/library_browse 的
 list_library_page()——按 view(all/trash) + 排序 + 分页浏览卡片列表。
-标签侧栏 AND 筛选、文件夹筛选、三态勾选/全选所有筛选结果、批量打标签/
-移文件夹/删除、单篇编辑、附件上传/预览这些全部留给后续增量（各自对应
-organizing/annotating/uploading/pdf_reading 等 feature，还没建页面）。
-这样本页面只依赖 library_browse 一个 feature，和已有的 auth/home 保持
-同一个"一页对一个主 feature"的节奏，不提前画一张本增量兑现不了的大饼。
+写路径目前只接 features/organizing 的软删/恢复两个单项操作（每张卡片一个
+删除/恢复按钮,work_ids=[单个 id]）。标签侧栏 AND 筛选、文件夹筛选、
+三态勾选/全选所有筛选结果、批量打标签/移文件夹、彻底删除、单篇编辑、
+附件上传/预览这些全部留给后续增量——批量操作要先有"选择集"这个前端状态
+才有意义,而「两处已定」第 2 条明确选择集的服务端解析是独立的一块,不该
+现在就为了删除按钮囫囵顺带做了。
 
 URL 用 `/l/<name-slug>-<id>/`——只认尾部数字 id，slug 前缀纯装饰，不校验
 是否和库名匹配（库改名后旧链接依然能打开，不需要重定向）。
@@ -14,7 +15,7 @@ URL 用 `/l/<name-slug>-<id>/`——只认尾部数字 id，slug 前缀纯装饰
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.shell.deps import current_account, db
@@ -32,6 +33,7 @@ from features.library_browse import (
     VIEWS,
     list_library_page,
 )
+from features.organizing import bulk_restore, bulk_soft_delete
 
 router = APIRouter()
 nav = NavItem(key="library", label="文献库", path="/library", icon="library", order=1)
@@ -46,6 +48,20 @@ def _parse_library_id(slug_and_id: str) -> int:
     if not tail.isdigit():
         raise HTTPException(status_code=404, detail="不是合法的文库地址")
     return int(tail)
+
+
+def _require_library(session, account_id: int, slug_and_id: str) -> int:
+    library_id = _parse_library_id(slug_and_id)
+    try:
+        resolve_scope(session, account_id=account_id, library_id=library_id)
+    except LibraryNotFound:
+        raise HTTPException(status_code=404, detail="文库不存在或你不是它的成员") from None
+    return library_id
+
+
+def _back_to_list(slug_and_id: str, *, view: str, sort_by: str, sort_dir: str, page: int) -> RedirectResponse:
+    url = f"/l/{slug_and_id}/?view={view}&sort_by={sort_by}&sort_dir={sort_dir}&page={page}"
+    return RedirectResponse(url, status_code=303)
 
 
 @router.get("/library", response_class=HTMLResponse)
@@ -74,11 +90,7 @@ def library_view(
     if account is None:
         return RedirectResponse("/login", status_code=303)
 
-    library_id = _parse_library_id(slug_and_id)
-    try:
-        resolve_scope(session, account_id=account.id, library_id=library_id)
-    except LibraryNotFound:
-        raise HTTPException(status_code=404, detail="文库不存在或你不是它的成员") from None
+    library_id = _require_library(session, account.id, slug_and_id)
 
     if view not in VIEWS or sort_by not in SORT_KEYS or sort_dir not in ("asc", "desc"):
         raise HTTPException(status_code=400, detail="筛选/排序参数不对")
@@ -109,3 +121,39 @@ def library_view(
             "total_pages": total_pages,
         },
     )
+
+
+@router.post("/l/{slug_and_id}/works/{work_id}/delete")
+def delete_work(
+    slug_and_id: str,
+    work_id: int,
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    bulk_soft_delete(session, account_id=account.id, library_id=library_id, work_ids=[work_id])
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+@router.post("/l/{slug_and_id}/works/{work_id}/restore")
+def restore_work_route(
+    slug_and_id: str,
+    work_id: int,
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    bulk_restore(session, account_id=account.id, library_id=library_id, work_ids=[work_id])
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)

@@ -1,4 +1,12 @@
+import re
+
 PASSWORD = "correct-horse-battery-staple"
+
+SAMPLE_RIS = """TY  - JOUR
+TI  - A Sample Paper
+PY  - 2020///
+ER  -
+"""
 
 
 def _register(client, *, username, email):
@@ -11,6 +19,13 @@ def _register(client, *, username, email):
 def _library_id_from_url(url) -> int:
     tail = str(url).rstrip("/").rpartition("-")[2]
     return int(tail)
+
+
+def _import_sample(client) -> int:
+    r = client.post("/import", data={"format": "ris", "raw_text": SAMPLE_RIS})
+    match = re.search(r"work_id=(\d+)", r.text)
+    assert match is not None, r.text
+    return int(match.group(1))
 
 
 # ── /library 入口 ────────────────────────────────────────────────────────
@@ -80,3 +95,47 @@ def test_library_view_renders_tabs_and_sort_controls(client):
     assert "全部" in response.text
     assert "回收站" in response.text
     assert 'value="updated_at" selected' in response.text
+
+
+# ── 删除 / 恢复 ──────────────────────────────────────────────────────────
+
+
+def test_delete_moves_work_to_trash_and_restore_brings_it_back(client):
+    _register(client, username="ruth", email="ruth@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    delete_response = client.post(
+        f"{library_url}works/{work_id}/delete",
+        data={"view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+    assert delete_response.status_code == 200  # 跟随了 303 回到 all 视图
+    assert "共 0 篇" in delete_response.text
+
+    trash_response = client.get(library_url, params={"view": "trash"})
+    assert "共 1 篇" in trash_response.text
+    assert "A Sample Paper" in trash_response.text
+
+    restore_response = client.post(
+        f"{library_url}works/{work_id}/restore",
+        data={"view": "trash", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+    assert restore_response.status_code == 200
+    assert "共 0 篇" in restore_response.text  # 回收站空了
+
+    all_response = client.get(library_url, params={"view": "all"})
+    assert "共 1 篇" in all_response.text
+    assert "A Sample Paper" in all_response.text
+
+
+def test_delete_requires_login(client):
+    _register(client, username="sam", email="sam@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    response = client.post(f"{library_url}works/{work_id}/delete", data={"view": "all"})
+
+    assert str(response.url).endswith("/login")
