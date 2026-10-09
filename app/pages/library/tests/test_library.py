@@ -970,3 +970,220 @@ def test_view_attachment_rejects_attachment_id_from_another_library(client):
 
     response = client.get(f"{iris_library_url}works/{iris_work_id}/attachments/{attachment_id}/view")
     assert response.status_code == 404
+
+
+# ── 批量操作 ─────────────────────────────────────────────────────────────
+
+
+def _batch_post(client, library_url, *, action, work_ids, **extra):
+    data = {
+        "action": action,
+        "work_ids": [str(w) for w in work_ids],
+        "view": "all",
+        "sort_by": "updated_at",
+        "sort_dir": "desc",
+        "page": "1",
+    }
+    data.update(extra)
+    return client.post(f"{library_url}batch", data=data)
+
+
+def test_batch_add_tag_then_remove_tag_applies_to_both_selected_works(client):
+    _register(client, username="batch1", email="batch1@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    work_a = _import_with_title(client, title="Batch Tag A", year=2021)
+    work_b = _import_with_title(client, title="Batch Tag B", year=2022)
+    tag_id = _add_tag(client, library_url, work_a, "batch-tag")
+
+    add_response = _batch_post(
+        client, library_url, action="add_tag", work_ids=[work_a, work_b], target_tag_id=str(tag_id)
+    )
+    assert add_response.status_code == 200
+    assert f"works/{work_b}/tags/{tag_id}/remove" in add_response.text
+    assert f"works/{work_a}/tags/{tag_id}/remove" in add_response.text
+
+    remove_response = _batch_post(
+        client, library_url, action="remove_tag", work_ids=[work_a, work_b], target_tag_id=str(tag_id)
+    )
+    assert remove_response.status_code == 200
+    assert f"works/{work_a}/tags/{tag_id}/remove" not in remove_response.text
+    assert f"works/{work_b}/tags/{tag_id}/remove" not in remove_response.text
+
+
+def test_batch_add_to_folder_then_remove_from_folder(client):
+    _register(client, username="batch2", email="batch2@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    slug_and_id = library_url.strip("/").removeprefix("l/")
+    work_a = _import_with_title(client, title="Batch Folder A", year=2021)
+    work_b = _import_with_title(client, title="Batch Folder B", year=2022)
+    folder_id = _create_folder(client, slug_and_id, "batch-folder")
+
+    add_response = _batch_post(
+        client, library_url, action="add_folder", work_ids=[work_a, work_b], target_folder_id=str(folder_id)
+    )
+    assert add_response.status_code == 200
+    filtered = client.get(library_url, params={"folder_id": folder_id})
+    assert "Batch Folder A" in filtered.text
+    assert "Batch Folder B" in filtered.text
+
+    remove_response = _batch_post(
+        client, library_url, action="remove_folder", work_ids=[work_a], target_folder_id=str(folder_id)
+    )
+    assert remove_response.status_code == 200
+    filtered_again = client.get(library_url, params={"folder_id": folder_id})
+    assert "Batch Folder A" not in filtered_again.text
+    assert "Batch Folder B" in filtered_again.text
+
+
+def test_batch_soft_delete_then_restore(client):
+    _register(client, username="batch3", email="batch3@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    work_a = _import_with_title(client, title="Batch Delete A", year=2021)
+    work_b = _import_with_title(client, title="Batch Delete B", year=2022)
+
+    delete_response = _batch_post(client, library_url, action="delete", work_ids=[work_a, work_b])
+    assert delete_response.status_code == 200
+    all_response = client.get(library_url, params={"view": "all"})
+    assert "共 0 篇" in all_response.text
+    trash_response = client.get(library_url, params={"view": "trash"})
+    assert "共 2 篇" in trash_response.text
+
+    restore_response = _batch_post(client, library_url, action="restore", work_ids=[work_a, work_b])
+    assert restore_response.status_code == 200
+    all_response_again = client.get(library_url, params={"view": "all"})
+    assert "共 2 篇" in all_response_again.text
+
+
+def test_batch_purge_requires_confirm_checkbox(client):
+    _register(client, username="batch4", email="batch4@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    work_id = _import_with_title(client, title="Batch Purge Unconfirmed", year=2021)
+    _batch_post(client, library_url, action="delete", work_ids=[work_id])
+
+    response = _batch_post(client, library_url, action="purge", work_ids=[work_id])
+
+    assert response.status_code == 200
+    assert "确认" in response.text
+    trash_response = client.get(library_url, params={"view": "trash"})
+    assert "Batch Purge Unconfirmed" in trash_response.text
+
+
+def test_batch_purge_with_confirm_permanently_removes_trashed_work(client):
+    _register(client, username="batch5", email="batch5@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    work_id = _import_with_title(client, title="Batch Purge Confirmed", year=2021)
+    _batch_post(client, library_url, action="delete", work_ids=[work_id])
+
+    response = _batch_post(
+        client, library_url, action="purge", work_ids=[work_id], confirm_purge="true"
+    )
+
+    assert response.status_code == 200
+    trash_response = client.get(library_url, params={"view": "trash"})
+    assert "共 0 篇" in trash_response.text
+
+
+def test_batch_purge_on_non_trashed_work_reports_failure_but_does_not_raise(client):
+    _register(client, username="batch6", email="batch6@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    work_id = _import_with_title(client, title="Batch Purge Not In Trash", year=2021)
+
+    response = _batch_post(
+        client, library_url, action="purge", work_ids=[work_id], confirm_purge="true"
+    )
+
+    assert response.status_code == 200
+    assert "失败" in response.text
+    all_response = client.get(library_url, params={"view": "all"})
+    assert "Batch Purge Not In Trash" in all_response.text
+
+
+def test_batch_action_with_no_work_ids_shows_error(client):
+    _register(client, username="batch7", email="batch7@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = _batch_post(client, library_url, action="delete", work_ids=[])
+
+    assert response.status_code == 200
+    assert "没有选中" in response.text
+
+
+def test_batch_add_tag_with_unselected_target_tag_shows_error(client):
+    _register(client, username="batch8", email="batch8@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    work_id = _import_with_title(client, title="Batch No Target Tag", year=2021)
+
+    response = _batch_post(client, library_url, action="add_tag", work_ids=[work_id], target_tag_id="")
+
+    # _require_target_id 直接抛 HTTPException(400)，和 _parse_library_id/
+    # sort_by 校验同一个风格——客户端传了不合法的参数，不是走友好重定向。
+    assert response.status_code == 400
+
+
+def test_batch_add_tag_rejects_tag_id_from_another_library(client):
+    _register(client, username="batch9", email="batch9@example.org")
+    batch9_lib_response = client.get("/library")
+    batch9_library_url = str(batch9_lib_response.url).replace("http://testserver", "")
+    batch9_work_id = _import_with_title(client, title="Batch9 Paper", year=2021)
+    other_tag_id = _add_tag(client, batch9_library_url, batch9_work_id, "batch9-tag")
+    client.post("/logout")
+
+    _register(client, username="batch10", email="batch10@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    work_id = _import_with_title(client, title="Batch10 Paper", year=2021)
+
+    response = _batch_post(
+        client, library_url, action="add_tag", work_ids=[work_id], target_tag_id=str(other_tag_id)
+    )
+
+    assert response.status_code == 200
+    assert "不属于这个库" in response.text
+
+
+def test_batch_add_tag_with_work_id_from_another_library_fails_only_that_item(client):
+    _register(client, username="batch11", email="batch11@example.org")
+    batch11_lib_response = client.get("/library")
+    batch11_library_url = str(batch11_lib_response.url).replace("http://testserver", "")
+    foreign_work_id = _import_with_title(client, title="Batch11 Foreign Paper", year=2021)
+    client.post("/logout")
+
+    _register(client, username="batch12", email="batch12@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    own_work_id = _import_with_title(client, title="Batch12 Own Paper", year=2021)
+    tag_id = _add_tag(client, library_url, own_work_id, "batch12-tag")
+    client.post(
+        f"{library_url}works/{own_work_id}/tags/{tag_id}/remove",
+        data={"view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    response = _batch_post(
+        client, library_url, action="add_tag",
+        work_ids=[own_work_id, foreign_work_id], target_tag_id=str(tag_id),
+    )
+
+    assert response.status_code == 200
+    assert "失败" in response.text
+    own_filtered = client.get(library_url, params={"tag_ids": tag_id})
+    assert "Batch12 Own Paper" in own_filtered.text
+
+
+def test_batch_action_requires_login(client):
+    _register(client, username="batch13", email="batch13@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    response = _batch_post(client, library_url, action="delete", work_ids=[work_id])
+
+    assert str(response.url).endswith("/login")

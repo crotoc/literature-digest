@@ -35,9 +35,24 @@ library_id（和 bulk_remove_tag 同一个安全模型），所以这两条路�
 `_back_to_list` 调用点,属于下一个增量的范围,不在这次顺带做。"未归档"
 （没有任何文件夹的文献）不支持——`_compile_filter_work_ids` 的
 `folder_id` 语义是"属于这个文件夹"，没有"不属于任何文件夹"这个反向
-查询。三态勾选/全选所有筛选结果（UI 侧）、批量打标签/移文件夹/编辑/
-导出（只导出选中项而不是整库）、彻底删除这些仍然留给后续增量——
-批量操作要先有"选择集"这个前端状态才有意义。
+查询。
+
+批量操作（`/l/{slug_and_id}/batch`）接的是 `features.organizing` 的
+`bulk_add_tag`/`bulk_remove_tag`/`bulk_add_to_folder`/`bulk_remove_from_folder`/
+`bulk_soft_delete`/`bulk_restore`/`purge_works`——这次选区只认页面上
+**显式勾选**的 checkbox（`work_ids` 原样提交），不接「两处已定」第 2 条
+"全选所有筛选结果"（`resolve_selection` 的 `mode="all_filtered"`，那个
+还要把 tag_ids/folder_id 筛选条件也带进请求，留给下一个增量）。
+`work_ids` 列表里混进不属于这个库的 id 不需要在页面层单独挡——
+`_run_batch` 对每一项单独走 `_check_work_scope`，校验失败只记一条
+failed outcome、不中断其余项、不抛到页面层，和 `features/dedupe_review`
+那次一样是"feature 自己已经做对了,页面层不需要再包一层"；但
+`target_tag_id`/`target_folder_id` 本身不属于这个库时是顶层直接抛
+`ValueError`（这两个值只有一份，不逐项校验），页面层接住转成提示。
+批量彻底删除（`purge`）额外要求勾选 `confirm_purge`——这个操作不可
+撤销，批量放大了误点的影响面，比单篇删除多一道确认合理。批量导出
+（只导出选中项而不是整库）、`cite_keys`/`cite_latex` 批量引用复制，
+仍然和"全选所有筛选结果"一起留给下一个增量。
 
 附件这次只接 features/uploading 的单文件上传/下载/删除三个单项操作，
 `BlobStore` 实例由 app/shell/deps.py 的 `blob_store()` 依赖注入（装配层
@@ -100,12 +115,14 @@ from features.library_browse import (
     list_library_page,
 )
 from features.organizing import (
+    bulk_add_tag,
     bulk_add_to_folder,
     bulk_remove_from_folder,
     bulk_remove_tag,
     bulk_restore,
     bulk_soft_delete,
     create_tag_and_apply,
+    purge_works,
 )
 from features.pdf_reading import VIEWABLE_CONTENT_TYPES, NotViewable, open_for_view
 from features.uploading import (
@@ -186,6 +203,16 @@ def _back_to_list_with_error(
         f"&error={quote(error)}"
     )
     return RedirectResponse(url, status_code=303)
+
+
+BATCH_ACTIONS = ("add_tag", "remove_tag", "add_folder", "remove_folder", "delete", "restore", "purge")
+
+
+def _require_target_id(value: str, label: str) -> int:
+    value = value.strip()
+    if not value.isdigit():
+        raise HTTPException(status_code=400, detail=f"没有选 {label}")
+    return int(value)
 
 
 @router.get("/library", response_class=HTMLResponse)
@@ -707,3 +734,96 @@ def view_attachment_route(
         media_type=attachment.content_type or "application/octet-stream",
         headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(attachment.filename)}"},
     )
+
+
+@router.post("/l/{slug_and_id}/batch")
+def batch_action_route(
+    slug_and_id: str,
+    action: str = Form(...),
+    work_ids: list[int] = Form([]),
+    target_tag_id: str = Form(""),
+    target_folder_id: str = Form(""),
+    confirm_purge: bool = Form(False),
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+    store=Depends(blob_store),
+):
+    """批量操作——这次只接"显式勾选"这一种选区（`work_ids` 是页面上被
+    勾中的 checkbox 原样提交回来的），不接"全选所有筛选结果"
+    （`features.library_browse.resolve_selection` 的 `mode="all_filtered"`）
+    ——那个还要把当前的 tag_ids/folder_id 筛选条件也带进这条路由,是下一个
+    增量的范围,「两处已定」第 2 条本来就把这两件事分开写。
+
+    `work_ids` 里混进不属于这个库的 id 不需要在这一层单独挡——
+    `features.organizing` 每个 `bulk_*` 函数内部的 `_check_work_scope`
+    对每一项单独校验，校验失败只记一条 "failed" outcome、不中断其余项、
+    不抛到这一层，和 `features/dedupe_review` 那次一样,是"feature 自己已经
+    做对了,页面层不需要再包一层"的情况。只有 `target_tag_id`/`target_folder_id`
+    本身不属于这个库时才是顶层直接抛 `ValueError`（这两个值只有一份，不是
+    逐项校验），这一层需要接住。
+    """
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+
+    if action not in BATCH_ACTIONS:
+        raise HTTPException(status_code=400, detail=f"不认识的批量操作：{action!r}")
+    if not work_ids:
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error="没有选中任何文献"
+        )
+
+    try:
+        if action == "add_tag":
+            tag_id = _require_target_id(target_tag_id, "标签")
+            result = bulk_add_tag(session, account_id=account.id, library_id=library_id, work_ids=work_ids, tag_id=tag_id)
+        elif action == "remove_tag":
+            tag_id = _require_target_id(target_tag_id, "标签")
+            result = bulk_remove_tag(session, account_id=account.id, library_id=library_id, work_ids=work_ids, tag_id=tag_id)
+        elif action == "add_folder":
+            folder_id = _require_target_id(target_folder_id, "文件夹")
+            result = bulk_add_to_folder(
+                session, account_id=account.id, library_id=library_id, work_ids=work_ids, folder_id=folder_id
+            )
+        elif action == "remove_folder":
+            folder_id = _require_target_id(target_folder_id, "文件夹")
+            result = bulk_remove_from_folder(
+                session, account_id=account.id, library_id=library_id, work_ids=work_ids, folder_id=folder_id
+            )
+        elif action == "delete":
+            result = bulk_soft_delete(session, account_id=account.id, library_id=library_id, work_ids=work_ids)
+        elif action == "restore":
+            result = bulk_restore(session, account_id=account.id, library_id=library_id, work_ids=work_ids)
+        else:  # "purge"
+            if not confirm_purge:
+                return _back_to_list_with_error(
+                    slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page,
+                    error="彻底删除需要先勾选确认，这个操作无法撤销",
+                )
+            result = purge_works(
+                session, account_id=account.id, library_id=library_id, work_ids=work_ids, blob_store=store
+            )
+    except ValueError as error_detail:
+        # 只有 target_tag_id/target_folder_id 不属于这个库时才会走到这里——
+        # 那是在 `_run_batch` 的逐项循环之前就做的一次性校验，直接抛出。
+        # `purge_works` 对"文献还没进回收站"的校验（`WorkNotInTrash`）发生
+        # 在 `apply_one` 内部，`_run_batch` 自己会 catch 住（它继承
+        # `AppError`，和逐项的 ValueError 走的是同一条 catch），变成一条
+        # failed outcome，不会跑到这个 except 块——下面的 failed 计数
+        # 分支才是处理它的地方，这里不需要也不应该单独接 WorkNotInTrash。
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error=str(error_detail)
+        )
+
+    failed = sum(1 for outcome in result.outcomes if outcome.status == "failed")
+    if failed:
+        done = len(result.outcomes) - failed
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page,
+            error=f"批量操作完成：{done} 篇成功，{failed} 篇失败",
+        )
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)

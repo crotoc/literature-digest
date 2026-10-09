@@ -181,3 +181,15 @@ code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em
 .library-filter-tags legend { font-size: 0.8rem; color: var(--muted); padding: 0; }
 .tag-filter-option { display: inline-flex; gap: 0.2rem; align-items: center; font-size: 0.9rem; }
 .library-filter-folder { display: inline-flex; gap: 0.35rem; align-items: center; font-size: 0.9rem; }
+
+.work-select { margin-right: 0.5rem; }
+.batch-bar {
+  display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;
+  margin: 0.5rem 0 1rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px;
+}
+.batch-bar select, .batch-bar input[type="text"] {
+  padding: 0.3rem; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg); color: var(--fg); font: inherit;
+}
+.batch-bar label.batch-confirm-purge { display: inline-flex; gap: 0.2rem; align-items: center; font-size: 0.9rem; color: #dc2626; }
+.batch-bar-picks { display: inline-flex; gap: 0.5rem; align-items: center; }

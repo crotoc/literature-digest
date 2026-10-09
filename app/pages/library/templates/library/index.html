@@ -80,9 +80,45 @@
     <p class="muted">这里还没有文献。</p>
   {% endif %}
 
+  {% if library_page.items %}
+    <form id="batch-form" method="post" action="/l/{{ slug_and_id }}/batch" class="batch-bar">
+      {{ hidden_state() }}
+      <span class="batch-bar-picks">
+        <a href="#" onclick="document.querySelectorAll('.work-select').forEach(function(c){c.checked=true}); return false;">全选本页</a>
+        <a href="#" onclick="document.querySelectorAll('.work-select').forEach(function(c){c.checked=false}); return false;">清除</a>
+      </span>
+      <select name="target_tag_id">
+        <option value="">选标签……</option>
+        {% for tag in all_tags %}
+          <option value="{{ tag.id }}">{{ tag.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" name="action" value="add_tag" class="btn">批量打标签</button>
+      <button type="submit" name="action" value="remove_tag" class="btn">批量去标签</button>
+      <select name="target_folder_id">
+        <option value="">选文件夹……</option>
+        {% for folder in folders %}
+          <option value="{{ folder.id }}">{{ folder.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" name="action" value="add_folder" class="btn">批量加入文件夹</button>
+      <button type="submit" name="action" value="remove_folder" class="btn">批量移出文件夹</button>
+      {% if view == "trash" %}
+        <button type="submit" name="action" value="restore" class="btn">批量恢复</button>
+        <label class="batch-confirm-purge">
+          <input type="checkbox" name="confirm_purge" value="true"> 确认彻底删除（不可撤销）
+        </label>
+        <button type="submit" name="action" value="purge" class="btn">批量彻底删除</button>
+      {% else %}
+        <button type="submit" name="action" value="delete" class="btn">批量移入回收站</button>
+      {% endif %}
+    </form>
+  {% endif %}
+
   <ul class="work-list">
     {% for card in library_page.items %}
       <li class="work-card card">
+        <input type="checkbox" class="work-select" name="work_ids" value="{{ card.work.id }}" form="batch-form">
         <h3>{{ card.work.title or "（无标题）" }}</h3>
         <p class="work-meta muted">
           {% for author in card.work.authors %}{{ author.literal or ((author.family or "") ~ (" " ~ author.given if author.given else "")) }}{% if not loop.last %}; {% endif %}{% endfor %}
