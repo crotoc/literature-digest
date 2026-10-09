@@ -77,12 +77,31 @@ else
     stash=$(mktemp -d)
     for t in $targets; do
       base=$(basename "$t")
+      # features/<x>/ 整个目录一起挪走，天然带走它自己的 tests/，"其余
+      # pytest" 不包含它自己的测试，符合规则原意。
+      # adapters/<类>/<x>.py 只是单个实现文件，它的测试和同类的其它实现
+      # 共享 adapters/<类>/tests/ 目录——如果只挪走实现文件，它自己名下的
+      # test_<x>.py 会因 ImportError 炸掉，被误判成"删掉它导致别处红了"。
+      # 所以按约定把同名的 tests/test_<x>.py 一起挪开，不计入"其余"。
+      test_counterpart=""
+      case "$t" in
+        adapters/*/*.py)
+          cand="$(dirname "$t")/tests/test_${base}"
+          [ -f "$cand" ] && test_counterpart="$cand"
+          ;;
+      esac
       mv "$t" "$stash/" 2>/dev/null || continue
+      if [ -n "$test_counterpart" ]; then
+        mv "$test_counterpart" "$stash/$(basename "$test_counterpart")"
+      fi
       if ! "$PY" -m pytest -q -p no:cacheprovider >/dev/null 2>&1; then
         report 7 "删掉 $t 后 pytest 不绿（存在隐式依赖）" "$t"
       fi
       rm -rf "$t"
       mv "$stash/$base" "$t"
+      if [ -n "$test_counterpart" ]; then
+        mv "$stash/$(basename "$test_counterpart")" "$test_counterpart"
+      fi
     done
     rmdir "$stash" 2>/dev/null || true
     [ "$fail" = "0" ] && ok 7 '任一 adapter/feature 可删'
