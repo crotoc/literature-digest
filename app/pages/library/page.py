@@ -10,10 +10,9 @@ list_library_page()——按 view(all/trash) + 排序 + 分页浏览卡片列表
 引用（每张卡片下面一行格式化引用串 + 三种格式各自的下载链接）。
 
 刻意裁剪：导出不含附件的 ZIP（要 features/uploading 落地的附件才有
-意义）；格式化引用串固定用 `DEFAULT_CITATION_STYLE`（APA），账号级
-"改引用样式"的设置项要等设置页落地才能接上
-`resolve_citation_style`/`set_default_citation_style`；LaTeX
-LaTeX cite 命令/citation key 复制是多选批量场景（`cite_keys`/`cite_latex`
+意义）；格式化引用串的样式现在接的是 `features.exporting.resolve_citation_style`
+（账号→站点→代码默认三级回退，账号级在 app/pages/settings 改），不再
+固定写死 APA。LaTeX cite 命令/citation key 复制是多选批量场景（`cite_keys`/`cite_latex`
 天生接收一组 work_ids），和这页目前全是单篇操作的调法不是一回事，留给
 批量/选择集机制落地之后。单篇加入/移出文件夹接的也是 features/organizing
 的单项操作（`bulk_add_to_folder`/`bulk_remove_from_folder`，work_ids=[单个
@@ -45,7 +44,7 @@ from domain.folders import list_folders
 from domain.libraries import LibraryDTO, LibraryNotFound, list_libraries_for_account, resolve_scope
 from domain.works import WorkNotFound, get_work, list_work_ids
 from features.annotating import set_work_note, update_metadata
-from features.exporting import cite_formatted, cite_record_text, export_bibliography
+from features.exporting import cite_formatted, cite_record_text, export_bibliography, resolve_citation_style
 from features.library_browse import (
     DEFAULT_PAGE_SIZE,
     DEFAULT_SORT_BY,
@@ -166,8 +165,10 @@ def library_view(
     # 笔记/元数据编辑面板只在 all 视图露出是同一个方向。
     citation_by_work_id = {}
     if view == "all":
+        citation_style = resolve_citation_style(session, account_id=account.id)
         citation_by_work_id = {
-            card.work.id: cite_formatted(session, work_id=card.work.id) for card in library_page.items
+            card.work.id: cite_formatted(session, work_id=card.work.id, style=citation_style)
+            for card in library_page.items
         }
 
     # 给每张卡片"加入文件夹"下拉用——库内文件夹数量级和标签池一样小，

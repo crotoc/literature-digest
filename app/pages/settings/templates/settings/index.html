@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}设置 · literature-digest{% endblock %}
+{% block content %}
+  <h2>设置</h2>
+
+  <h3>引用样式</h3>
+  <p class="muted">文献库页面上每张卡片下面的格式化引用串按这个样式渲染。</p>
+  <form method="post" action="/settings/citation-style" class="settings-form">
+    <select name="style">
+      {% for style in styles %}
+        <option value="{{ style }}" {% if style == current_style %}selected{% endif %}>{{ style }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-primary">保存</button>
+  </form>
+{% endblock %}
