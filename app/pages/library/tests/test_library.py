@@ -258,3 +258,30 @@ def test_save_note_requires_login(client):
     response = client.post(f"{library_url}works/{work_id}/note", data={"content": "不该成功"})
 
     assert str(response.url).endswith("/login")
+
+
+def test_save_note_rejects_work_id_from_another_library(client):
+    # features.annotating.set_work_note 自己不校验 work_id 是否真的属于
+    # 传入的 library_id——这个检查必须在页面层做，否则账号 A 能对着自己的
+    # 文库 URL、拿一个属于账号 B 的 work_id 去改 B 的笔记。
+    _register(client, username="yuki", email="yuki@example.org")
+    yuki_work_id = _import_sample(client)
+    yuki_lib_response = client.get("/library")
+    yuki_library_url = str(yuki_lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    _register(client, username="zane", email="zane@example.org")
+    zane_lib_response = client.get("/library")
+    zane_library_url = str(zane_lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{zane_library_url}works/{yuki_work_id}/note",
+        data={"content": "越权写入", "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+    assert response.status_code == 404
+
+    # 确认真没写进去：用 yuki 自己的账号重新登录查看，笔记栏应该仍是空的。
+    client.post("/logout")
+    client.post("/login", data={"username_or_email": "yuki", "password": PASSWORD})
+    check_response = client.get(yuki_library_url)
+    assert "越权写入" not in check_response.text

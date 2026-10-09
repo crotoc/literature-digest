@@ -27,6 +27,7 @@ from app.shell.templating import templates
 from caps.slug import slugify
 from domain.accounts import AccountDTO
 from domain.libraries import LibraryDTO, LibraryNotFound, list_libraries_for_account, resolve_scope
+from domain.works import WorkNotFound, get_work
 from features.annotating import set_work_note
 from features.library_browse import (
     DEFAULT_PAGE_SIZE,
@@ -61,6 +62,24 @@ def _require_library(session, account_id: int, slug_and_id: str) -> int:
     except LibraryNotFound:
         raise HTTPException(status_code=404, detail="文库不存在或你不是它的成员") from None
     return library_id
+
+
+def _require_work_in_library(session, library_id: int, work_id: int):
+    """features/organizing 的批量操作自己做了跨库 work_id 校验
+    （`_check_work_scope`），但 features/annotating 的 `set_work_note` /
+    `update_metadata` 都只认 work_id、从不核对它是不是真的属于传入的
+    `library_id`——两者都是直接拿 work_id 查/改行，`library_id` 参数只用来
+    给新建的笔记行或重复扫描定范围，不是访问控制。所以这个检查必须留在
+    页面这一层，否则账号 A 能对着自己的文库 URL、拿一个属于账号 B 的
+    work_id 去改 B 的笔记/元数据。
+    """
+    try:
+        work = get_work(session, work_id)
+    except WorkNotFound:
+        raise HTTPException(status_code=404, detail="文献不存在") from None
+    if work.library_id != library_id:
+        raise HTTPException(status_code=404, detail="文献不存在或不属于这个文库") from None
+    return work
 
 
 def _back_to_list(slug_and_id: str, *, view: str, sort_by: str, sort_dir: str, page: int) -> RedirectResponse:
@@ -221,6 +240,7 @@ def save_note_route(
     if account is None:
         return RedirectResponse("/login", status_code=303)
     library_id = _require_library(session, account.id, slug_and_id)
+    _require_work_in_library(session, library_id, work_id)
     # 空白内容按"删这条笔记"处理——domain.notes.set_note 自己的语义是
     # content=None 即删除；这里把"用户把文本框清空再保存"自然映射过去，
     # 不需要单独一个"删除笔记"按钮。
