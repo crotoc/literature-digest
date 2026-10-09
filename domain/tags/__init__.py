@@ -1,0 +1,43 @@
+"""domain/tags。详见 contract.py。"""
+
+from domain.tags.contract import (
+    TAG_STATES,
+    TagDTO,
+    TagNameTaken,
+    TagNotFound,
+    TagStateDTO,
+    WorkTagDTO,
+    WorkTagNotFound,
+    add_tag_to_work,
+    aggregate_states,
+    create_tag,
+    delete_tag,
+    get_tag,
+    list_tags,
+    list_tags_for_work,
+    list_work_ids_for_tag,
+    remove_tag_from_work,
+    rename_tag,
+    reorder_tags,
+)
+
+__all__ = [
+    "TAG_STATES",
+    "TagDTO",
+    "TagNameTaken",
+    "TagNotFound",
+    "TagStateDTO",
+    "WorkTagDTO",
+    "WorkTagNotFound",
+    "add_tag_to_work",
+    "aggregate_states",
+    "create_tag",
+    "delete_tag",
+    "get_tag",
+    "list_tags",
+    "list_tags_for_work",
+    "list_work_ids_for_tag",
+    "remove_tag_from_work",
+    "rename_tag",
+    "reorder_tags",
+]

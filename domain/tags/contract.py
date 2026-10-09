@@ -1,0 +1,43 @@
+"""domain/tags 的对外表面。外部只许 import 这里的东西，不碰 models.py。"""
+
+from domain.tags.service import (
+    TAG_STATES,
+    TagDTO,
+    TagNameTaken,
+    TagNotFound,
+    TagStateDTO,
+    WorkTagDTO,
+    WorkTagNotFound,
+    add_tag_to_work,
+    aggregate_states,
+    create_tag,
+    delete_tag,
+    get_tag,
+    list_tags,
+    list_tags_for_work,
+    list_work_ids_for_tag,
+    remove_tag_from_work,
+    rename_tag,
+    reorder_tags,
+)
+
+__all__ = [
+    "TAG_STATES",
+    "TagDTO",
+    "TagNameTaken",
+    "TagNotFound",
+    "TagStateDTO",
+    "WorkTagDTO",
+    "WorkTagNotFound",
+    "add_tag_to_work",
+    "aggregate_states",
+    "create_tag",
+    "delete_tag",
+    "get_tag",
+    "list_tags",
+    "list_tags_for_work",
+    "list_work_ids_for_tag",
+    "remove_tag_from_work",
+    "rename_tag",
+    "reorder_tags",
+]
