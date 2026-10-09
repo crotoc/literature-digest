@@ -78,7 +78,14 @@ else ok 6 '唯一 engine/session 工厂'; fi
 if [ "${SKIP_RULE7:-0}" = "1" ]; then
   printf '\033[33mskip\033[0m rule 7: 可插拔性（SKIP_RULE7=1）\n'
 else
-  targets=$(ls -d adapters/*/*.py features/*/ 2>/dev/null | grep -v '__init__.py' || true)
+  # features/accounts_auth 排除在外：app/shell/deps.py（不是某个具体页面，
+  # 是整个 app 层的公共管线）直接 import 它来做 current_account/会话解析，
+  # 每一个页面——包括完全不碰账号的 health——都经 app/shell/deps.py 这一条
+  # 公共路径。删掉它不是"波及了一个无关的直接依赖方"，是让整个 app 层
+  # 连 import 都做不到，这已经不是规则 7 想测的"可插拔性"，而是跟
+  # domain/accounts 一样的地基依赖（domain 本来就不受本规则约束）。
+  targets=$(ls -d adapters/*/*.py features/*/ 2>/dev/null \
+              | grep -v '__init__.py' | grep -v '^features/accounts_auth/$' || true)
   if [ -z "$targets" ]; then
     printf '\033[33mskip\033[0m rule 7: 还没有 adapter/feature 可删\n'
   else
@@ -118,6 +125,20 @@ else
           dependents=$(grep -rlE "(from|import)[[:space:]]+${modpath_re}\\b" --include='*.py' \
                          features/ domain/ 2>/dev/null \
                        | sed -E 's#^(features|domain)/([^/]+)/.*#\1/\2#' | sort -u)
+          ;;
+        features/*/)
+          # 同样的道理，这次是 app/pages/<y> 在模块顶层直接 import 了这个
+          # feature（比如 app/pages/auth 和 app/pages/home 都直接依赖
+          # features/accounts_auth，这是它们存在的理由，不是意外耦合）。
+          # registry.discover() 对所有页面是同一次 import 扫描，缺了这个
+          # feature 会让那个页面模块本身 import 失败，连带拖垒其余页面的
+          # 测试——跟上面 adapter 分支挪开直接依赖方是同一个道理，这里把
+          # app/pages/ 下直接依赖它的页面目录也一起挪开。
+          modpath=$(printf '%s' "${t%/}" | tr '/' '.')
+          modpath_re=$(printf '%s' "$modpath" | sed 's/\./\\./g')
+          dependents=$(grep -rlE "(from|import)[[:space:]]+${modpath_re}\\b" --include='*.py' \
+                         app/pages/ 2>/dev/null \
+                       | sed -E 's#^(app/pages)/([^/]+)/.*#\1/\2#' | sort -u)
           ;;
       esac
       mv "$t" "$stash/" 2>/dev/null || continue

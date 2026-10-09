@@ -39,3 +39,19 @@ body {
 .container-wide { max-width: 100%; padding: 1.5rem 1rem; }
 .muted { color: var(--muted); }
 code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em 0.35em; border-radius: 3px; }
+
+.card { border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; }
+.card-narrow { max-width: 24rem; margin: 2rem auto; }
+.form-field { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 1rem; }
+.form-field input {
+  padding: 0.5rem; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg); color: var(--fg);
+}
+.btn {
+  padding: 0.5rem 1rem; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--fg); cursor: pointer; font: inherit;
+}
+.btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+.alert { padding: 0.5rem 0.75rem; border-radius: 4px; margin-bottom: 1rem; }
+.alert-error { background: color-mix(in srgb, #dc2626 12%, transparent); color: #dc2626; }
+.form-footer { margin-top: 1rem; color: var(--muted); }

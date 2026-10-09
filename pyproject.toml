@@ -27,7 +27,7 @@ dev = ["pytest>=8.3", "ruff>=0.8"]
 include = ["infra*", "caps*", "domain*", "adapters*", "features*", "app*"]
 
 [tool.pytest.ini_options]
-testpaths = ["caps", "domain", "adapters", "features", "tests"]
+testpaths = ["caps", "domain", "adapters", "features", "app", "tests"]
 python_files = ["test_*.py"]
 
 [tool.ruff]
@@ -36,3 +36,8 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# FastAPI 的 Depends(...)/Query(...) 当默认参数值是框架本身的设计（每次请求
+# 重新解析，不是会被意外共享的可变默认值），B008 不认识这个例外，这里显式
+# 放行，不是关掉整条规则。
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Form"]

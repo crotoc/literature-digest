@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}登录 · literature-digest{% endblock %}
+{% block content %}
+  <div class="card card-narrow">
+    <h1>登录</h1>
+    {% if error %}<p class="alert alert-error">{{ error }}</p>{% endif %}
+    <form method="post" action="/login">
+      <label class="form-field">
+        <span>用户名或邮箱</span>
+        <input type="text" name="username_or_email" value="{{ username_or_email or '' }}" required autofocus>
+      </label>
+      <label class="form-field">
+        <span>密码</span>
+        <input type="password" name="password" required>
+      </label>
+      <button type="submit" class="btn btn-primary">登录</button>
+    </form>
+    <p class="form-footer">还没有账号？<a href="/register">注册一个</a></p>
+  </div>
+{% endblock %}

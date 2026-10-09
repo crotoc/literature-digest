@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}首页 · literature-digest{% endblock %}
+{% block content %}
+  <h1>欢迎，{{ account.username }}</h1>
+  <p class="muted">
+    研究动态仪表盘要等 intents / reports（E3 / E4 阶段）落地后才会出现在这里。
+  </p>
+  <form method="post" action="/logout">
+    <button type="submit" class="btn">退出登录</button>
+  </form>
+{% endblock %}

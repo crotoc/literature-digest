@@ -12,6 +12,7 @@ from contextlib import contextmanager
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from infra.config import settings
 
@@ -51,6 +52,25 @@ def session_scope() -> Iterator[Session]:
         session.close()
 
 
+def _new_memory_engine():
+    # StaticPool：sqlite:///:memory: 默认按线程分配各自独立的连接
+    # (SingletonThreadPool)，而 app 层的 HTTP 测试（TestClient）会把同步
+    # endpoint 丢进另一个线程池线程去跑（FastAPI 走 anyio.to_thread），
+    # 跟建表时所在的线程不是同一个——不用 StaticPool 强制全程只有一个
+    # 连接的话，请求线程会连到一个空的、没有任何表的全新内存库上，报
+    # "no such table"。这个坑只在 app 层通过真实 HTTP 请求触发时才会
+    # 暴露，domain/features 的单测直接用同一个 Session、同一个线程，
+    # 刚好把这坑盖住了。
+    engine = create_engine(
+        "sqlite:///:memory:",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    return engine
+
+
 def new_memory_session() -> Session:
     """给 domain 模块单测用：每次调用一个全新的、与 `ENGINE` 完全独立的内存
     SQLite。不走 `.env` 的 `DATABASE_URL`，不会碰开发库，调用之间也互不可见。
@@ -60,6 +80,20 @@ def new_memory_session() -> Session:
     把这个口子开在本文件而不是各 `domain/<x>/tests/conftest.py` 里自己建，
     是为了让这条例外仍然只有一处。
     """
-    engine = create_engine("sqlite:///:memory:", future=True)
-    Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)()
+    return sessionmaker(bind=_new_memory_engine(), autoflush=False, expire_on_commit=False)()
+
+
+def new_memory_session_factory() -> sessionmaker:
+    """给 `app/` 层 HTTP 测试用：返回绑定在一个独立内存 SQLite 上的
+    `sessionmaker` 本身，而不是 `new_memory_session()` 那样的单个 Session。
+
+    `app.shell.deps.db` 每个请求各自开关一个 Session；一次 HTTP 测试内
+    往往要发多个请求（比如先注册再登录），这些请求必须落在**同一个**内存
+    数据库上，但各自仍然是独立的 Session——所以需要的是 sessionmaker，
+    调用方（`app.shell.testing.test_client`）拿它去覆盖 `db` 依赖，每次
+    请求现造一个 Session，整个测试期间共用同一个底层 engine。
+
+    和 `new_memory_session()` 共用同一个 `_new_memory_engine()`，没有在
+    本文件之外新开一个 create_engine 调用点。
+    """
+    return sessionmaker(bind=_new_memory_engine(), autoflush=False, expire_on_commit=False)
