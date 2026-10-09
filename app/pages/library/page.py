@@ -9,8 +9,11 @@ list_library_page()——按 view(all/trash) + 排序 + 分页浏览卡片列表
 结构化字段不在内）、整库导出（RIS/BibTeX/CSL-JSON 文本文件）和单条
 引用（每张卡片下面一行格式化引用串 + 三种格式各自的下载链接）。
 
-刻意裁剪：导出不含附件的 ZIP（要 features/uploading 落地的附件才有
-意义）；格式化引用串的样式现在接的是 `features.exporting.resolve_citation_style`
+整库导出现在有两种产物：纯文本参考文献文件，和"RIS/BibTeX/CSL-JSON +
+附件原文件"的 ZIP（`export_with_attachments_zip`，导出表单的"含附件"
+勾选框决定走哪条）——这是计划「③ 导出」里"RIS + PDF ZIP"这一行，之前
+没做是因为要等 features/uploading 落地的附件才有意义，现在附件已经有了。
+格式化引用串的样式现在接的是 `features.exporting.resolve_citation_style`
 （账号→站点→代码默认三级回退，账号级在 app/pages/settings 改），不再
 固定写死 APA。LaTeX cite 命令/citation key 复制是多选批量场景（`cite_keys`/`cite_latex`
 天生接收一组 work_ids），和这页目前全是单篇操作的调法不是一回事，留给
@@ -67,7 +70,13 @@ from domain.folders import list_folders
 from domain.libraries import LibraryDTO, LibraryNotFound, list_libraries_for_account, resolve_scope
 from domain.works import WorkNotFound, get_work, list_work_ids
 from features.annotating import set_work_note, update_metadata
-from features.exporting import cite_formatted, cite_record_text, export_bibliography, resolve_citation_style
+from features.exporting import (
+    cite_formatted,
+    cite_record_text,
+    export_bibliography,
+    export_with_attachments_zip,
+    resolve_citation_style,
+)
 from features.library_browse import (
     DEFAULT_PAGE_SIZE,
     DEFAULT_SORT_BY,
@@ -471,8 +480,10 @@ _EXPORT_EXTENSIONS = {"ris": "ris", "bibtex": "bib", "csljson": "json"}
 def export_library_route(
     slug_and_id: str,
     format: str = "ris",
+    with_attachments: bool = False,
     account: AccountDTO | None = Depends(current_account),
     session=Depends(db),
+    store=Depends(blob_store),
 ):
     if account is None:
         return RedirectResponse("/login", status_code=303)
@@ -486,6 +497,21 @@ def export_library_route(
     # 是同一个方向。不分页、不走选择集：v1 范围就是"整库"，批量/选中项
     # 导出留给选择集机制落地之后。
     work_ids = list_work_ids(session, library_id=library_id)
+
+    if with_attachments:
+        # 计划「③ 导出」里的"RIS + PDF ZIP"——附件原文件和参考文献文件
+        # 平级打进一个 ZIP，不是"Zotero RIS 含附件相对路径关联"（那个
+        # 需要 Record 多一个专用字段约定，见 features/exporting 的
+        # README 刻意裁剪范围）。
+        zip_body = export_with_attachments_zip(
+            session, library_id=library_id, work_ids=work_ids, format=format, blob_store=store
+        )
+        return Response(
+            content=zip_body,
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="library.zip"'},
+        )
+
     body = export_bibliography(session, library_id=library_id, work_ids=work_ids, format=format)
 
     ext = _EXPORT_EXTENSIONS[format]

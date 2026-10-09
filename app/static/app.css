@@ -173,3 +173,5 @@ code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em
 .log-msg { word-break: break-word; }
 .log-level-error, .log-level-critical { color: #dc2626; }
 .log-level-warning { color: #d97706; }
+
+.export-with-attachments { display: inline-flex; gap: 0.25rem; align-items: center; font-size: 0.9rem; }

@@ -1,4 +1,6 @@
+import io
 import re
+import zipfile
 
 PASSWORD = "correct-horse-battery-staple"
 
@@ -398,6 +400,43 @@ def test_export_bibtex_and_csljson_also_work(client):
     csljson_response = client.get(f"{library_url}export", params={"format": "csljson"})
     assert csljson_response.status_code == 200
     assert "A Sample Paper" in csljson_response.text
+
+
+def test_export_with_attachments_returns_zip_with_bibliography_and_file(client):
+    _register(client, username="greta2", email="greta2@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    client.post(
+        f"{library_url}works/{work_id}/attachments/upload",
+        files={"file": ("notes.txt", b"hello attachment", "text/plain")},
+    )
+
+    response = client.get(
+        f"{library_url}export", params={"format": "ris", "with_attachments": "true"}
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert "library.zip" in response.headers["content-disposition"]
+
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        names = archive.namelist()
+        assert "bibliography.ris" in names
+        assert any(name.startswith("attachments/") for name in names)
+        assert "A Sample Paper" in archive.read("bibliography.ris").decode("utf-8")
+
+
+def test_export_without_attachments_flag_returns_plain_text_not_zip(client):
+    _register(client, username="greta3", email="greta3@example.org")
+    _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.get(f"{library_url}export", params={"format": "ris"})
+
+    assert response.headers["content-type"].startswith("application/x-research-info-systems")
 
 
 def test_export_rejects_unsupported_format(client):
