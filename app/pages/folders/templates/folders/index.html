@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}文件夹 · literature-digest{% endblock %}
+{% block content %}
+  <h2>文件夹</h2>
+
+  {% if error %}
+    <p class="alert alert-error">{{ error }}</p>
+  {% endif %}
+
+  {% if not tree %}
+    <p class="muted">还没有文件夹。</p>
+  {% endif %}
+
+  <ul class="folder-tree">
+    {% for folder, depth in tree %}
+      <li class="folder-row" style="margin-left: {{ depth * 1.5 }}rem;">
+        <span class="folder-name">{{ folder.name }}</span>
+
+        <form method="post" class="folder-inline-form" action="/l/{{ slug_and_id }}/folders/{{ folder.id }}/rename">
+          <input type="text" name="name" value="{{ folder.name }}" size="16">
+          <button type="submit" class="btn">改名</button>
+        </form>
+
+        <form method="post" class="folder-inline-form" action="/l/{{ slug_and_id }}/folders/{{ folder.id }}/move">
+          <select name="new_parent_folder_id">
+            <option value="">（根层）</option>
+            {% for other in folders %}
+              {% if other.id != folder.id %}
+                <option value="{{ other.id }}" {% if other.id == folder.parent_folder_id %}selected{% endif %}>
+                  {{ other.name }}
+                </option>
+              {% endif %}
+            {% endfor %}
+          </select>
+          <button type="submit" class="btn">移动</button>
+        </form>
+
+        <form method="post" class="folder-inline-form" action="/l/{{ slug_and_id }}/folders/{{ folder.id }}/delete">
+          <button type="submit" class="btn">删除（含子文件夹）</button>
+        </form>
+      </li>
+    {% endfor %}
+  </ul>
+
+  <h3>新建文件夹</h3>
+  <form method="post" class="folder-create-form" action="/l/{{ slug_and_id }}/folders/create">
+    <input type="text" name="name" placeholder="文件夹名" required>
+    <select name="parent_folder_id">
+      <option value="">（根层）</option>
+      {% for folder, depth in tree %}
+        <option value="{{ folder.id }}">{{ "　" * depth }}{{ folder.name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-primary">新建</button>
+  </form>
+{% endblock %}
