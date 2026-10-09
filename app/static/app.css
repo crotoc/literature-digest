@@ -55,3 +55,21 @@ code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em
 .alert { padding: 0.5rem 0.75rem; border-radius: 4px; margin-bottom: 1rem; }
 .alert-error { background: color-mix(in srgb, #dc2626 12%, transparent); color: #dc2626; }
 .form-footer { margin-top: 1rem; color: var(--muted); }
+
+.library-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; gap: 1rem; flex-wrap: wrap; }
+.tabs { display: flex; gap: 0.5rem; }
+.tab { padding: 0.35rem 0.75rem; border-radius: 4px; color: var(--muted); text-decoration: none; }
+.tab.is-active { background: var(--accent); color: white; }
+.sort-form select {
+  padding: 0.35rem; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg); color: var(--fg); font: inherit;
+}
+.work-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.75rem; }
+.work-card { padding: 1rem; }
+.work-card h3 { margin: 0 0 0.25rem; }
+.work-meta { margin: 0 0 0.5rem; }
+.tag-chip {
+  display: inline-block; padding: 0.1rem 0.5rem; margin-right: 0.35rem; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); font-size: 0.85em;
+}
+.pagination { display: flex; align-items: center; gap: 1rem; justify-content: center; margin-top: 1.5rem; }

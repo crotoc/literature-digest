@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}文献库 · literature-digest{% endblock %}
+{% block container_class %}container-wide{% endblock %}
+{% block content %}
+  <div class="library-toolbar">
+    <div class="tabs">
+      <a class="tab{% if view == 'all' %} is-active{% endif %}" href="?view=all">全部</a>
+      <a class="tab{% if view == 'trash' %} is-active{% endif %}" href="?view=trash">回收站</a>
+    </div>
+    <form method="get" class="sort-form">
+      <input type="hidden" name="view" value="{{ view }}">
+      <select name="sort_by" onchange="this.form.submit()">
+        <option value="updated_at" {% if sort_by == "updated_at" %}selected{% endif %}>更新时间</option>
+        <option value="created_at" {% if sort_by == "created_at" %}selected{% endif %}>加入时间</option>
+        <option value="year" {% if sort_by == "year" %}selected{% endif %}>年份</option>
+        <option value="title" {% if sort_by == "title" %}selected{% endif %}>标题</option>
+      </select>
+      <select name="sort_dir" onchange="this.form.submit()">
+        <option value="desc" {% if sort_dir == "desc" %}selected{% endif %}>降序</option>
+        <option value="asc" {% if sort_dir == "asc" %}selected{% endif %}>升序</option>
+      </select>
+    </form>
+  </div>
+
+  <p class="muted">共 {{ library_page.total }} 篇</p>
+
+  {% if not library_page.items %}
+    <p class="muted">这里还没有文献。</p>
+  {% endif %}
+
+  <ul class="work-list">
+    {% for card in library_page.items %}
+      <li class="work-card card">
+        <h3>{{ card.work.title or "（无标题）" }}</h3>
+        <p class="work-meta muted">
+          {% for author in card.work.authors %}{{ author.literal or ((author.family or "") ~ (" " ~ author.given if author.given else "")) }}{% if not loop.last %}; {% endif %}{% endfor %}
+          {% if card.work.year %} · {{ card.work.year }}{% endif %}
+          {% if card.work.container_title %} · {{ card.work.container_title }}{% endif %}
+        </p>
+        {% if card.tags %}
+          <p class="work-tags">
+            {% for tag in card.tags %}<span class="tag-chip">{{ tag.name }}</span>{% endfor %}
+          </p>
+        {% endif %}
+        {% if card.folders %}
+          <p class="muted">
+            文件夹：{% for folder in card.folders %}{{ folder.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+          </p>
+        {% endif %}
+        <p class="muted">{{ card.attachments | length }} 个附件{% if card.note %} · 有笔记{% endif %}</p>
+      </li>
+    {% endfor %}
+  </ul>
+
+  <nav class="pagination">
+    {% if page > 1 %}
+      <a href="?view={{ view }}&sort_by={{ sort_by }}&sort_dir={{ sort_dir }}&page={{ page - 1 }}">← 上一页</a>
+    {% endif %}
+    <span class="muted">第 {{ page }} / {{ total_pages }} 页</span>
+    {% if page < total_pages %}
+      <a href="?view={{ view }}&sort_by={{ sort_by }}&sort_dir={{ sort_dir }}&page={{ page + 1 }}">下一页 →</a>
+    {% endif %}
+  </nav>
+{% endblock %}
