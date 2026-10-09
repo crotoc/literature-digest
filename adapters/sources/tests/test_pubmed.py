@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from adapters.sources.pubmed import PubMedError, lookup_by_pmid
+from adapters.sources.pubmed import PubMedError, check, lookup_by_pmid
 
 _FAKE_RESOLVE = lambda host: ["130.14.29.110"]  # noqa: E731
 
@@ -133,3 +133,45 @@ def test_lookup_by_pmid_no_authors():
     transport = _transport(200, _result_payload(summary))
     record = lookup_by_pmid(PMID, transport=transport, resolve=_FAKE_RESOLVE)
     assert record.authors == ()
+
+
+_PROBE_PMID = "30049270"
+
+
+def _probe_result_payload() -> dict:
+    summary = {**PUBMED_SUMMARY, "uid": _PROBE_PMID}
+    return {"result": {"uids": [_PROBE_PMID], _PROBE_PMID: summary}}
+
+
+def test_check_ok_without_api_key():
+    transport = _transport(200, _probe_result_payload())
+    result = check(None, transport=transport, resolve=_FAKE_RESOLVE)
+    assert result.ok is True
+
+
+def test_check_ok_passes_api_key_through():
+    seen_params = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_params.update(dict(request.url.params))
+        return httpx.Response(200, json=_probe_result_payload())
+
+    result = check(
+        {"api_key": "secret-key"},
+        transport=httpx.MockTransport(handler),
+        resolve=_FAKE_RESOLVE,
+    )
+    assert result.ok is True
+    assert seen_params.get("api_key") == "secret-key"
+
+
+def test_check_fails_when_probe_pmid_not_found():
+    transport = _transport(200, {"result": {"uids": []}})
+    result = check(None, transport=transport, resolve=_FAKE_RESOLVE)
+    assert result.ok is False
+
+
+def test_check_fails_on_server_error():
+    transport = _transport(500, {})
+    result = check(None, transport=transport, resolve=_FAKE_RESOLVE)
+    assert result.ok is False

@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from adapters.sources.crossref import CrossrefError, lookup_by_doi
+from adapters.sources.crossref import CrossrefError, check, lookup_by_doi
 from caps.bibformats import Person
 
 # api.crossref.org 真实指向公网 IP，但单测不该依赖真实 DNS 查询——用一个固定
@@ -177,3 +177,37 @@ def test_lookup_by_doi_no_authors():
     transport = _transport(200, {"status": "ok", "message": message})
     record = lookup_by_doi("10.1038/noauthor", transport=transport, resolve=_FAKE_RESOLVE)
     assert record.authors == ()
+
+
+def test_check_ok_without_mailto():
+    transport = _transport(200, {"status": "ok", "message": CROSSREF_MESSAGE})
+    result = check(None, transport=transport, resolve=_FAKE_RESOLVE)
+    assert result.ok is True
+
+
+def test_check_ok_passes_mailto_through():
+    seen_params = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_params.update(dict(request.url.params))
+        return httpx.Response(200, json={"status": "ok", "message": CROSSREF_MESSAGE})
+
+    result = check(
+        {"mailto": "researcher@example.org"},
+        transport=httpx.MockTransport(handler),
+        resolve=_FAKE_RESOLVE,
+    )
+    assert result.ok is True
+    assert seen_params.get("mailto") == "researcher@example.org"
+
+
+def test_check_fails_when_probe_doi_not_found():
+    transport = _transport(404, b"not found")
+    result = check(None, transport=transport, resolve=_FAKE_RESOLVE)
+    assert result.ok is False
+
+
+def test_check_fails_on_server_error():
+    transport = _transport(500, b"internal error")
+    result = check(None, transport=transport, resolve=_FAKE_RESOLVE)
+    assert result.ok is False

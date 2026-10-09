@@ -16,12 +16,19 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
+from typing import Any
 from urllib.parse import quote
 
 from caps.bibformats import Person, Record
 from caps.httpfetch import HttpFetchError, RateLimiter, default_resolve, fetch
+from caps.probe import ProbeResult, fail, ok
 
 BASE_URL = "https://api.crossref.org/works"
+
+# "测连接"用的探测 DOI：选一篇确定稳定存在、不会被撤稿的老论文，只是为了验证
+# 能不能查通，不关心查到的具体内容。
+_PROBE_DOI = "10.1037/0003-066x.59.1.29"
 
 # Crossref 的 `type` 字段取值比 Record.item_type 细得多（还有 journal-issue /
 # standard 等本模块不关心的类型），只映射 ITEM_TYPES 里有的那些；查不到映射的
@@ -150,3 +157,28 @@ def _strip_jats(abstract: str | None) -> str | None:
     if abstract is None:
         return None
     return _JATS_TAG_RE.sub("", abstract).strip() or None
+
+
+def check(
+    config: Mapping[str, Any] | None,
+    *,
+    transport=None,
+    resolve=default_resolve,
+) -> ProbeResult:
+    """满足 `caps.probe.CheckFn` 协议：测一次到 Crossref 的真实连通性。
+
+    `config` 只认 `mailto`（polite pool 的限速优待，不是访问门槛）——没给
+    也能测通，所以这个来源即使还没配任何东西也应该能点"测试连接"。
+
+    `transport`/`resolve` 是测试钩子，原样转发给 `lookup_by_doi`，生产代码
+    不传；`caps.probe.run_check` 只会以单个 `config` 参数调用这个函数，这两
+    个额外的可选关键字参数不影响它满足 `CheckFn` 协议。
+    """
+    mailto = (config or {}).get("mailto")
+    try:
+        record = lookup_by_doi(_PROBE_DOI, mailto=mailto, transport=transport, resolve=resolve)
+    except CrossrefError as exc:
+        return fail(f"查询 Crossref 失败：{exc}")
+    if record is None:
+        return fail(f"测试 DOI 查无结果：{_PROBE_DOI}（这不代表凭据本身有问题，可能是索引变更）")
+    return ok(f"Crossref 连接正常（mailto={mailto or '未设置'}）", probe_doi=_PROBE_DOI)

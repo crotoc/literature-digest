@@ -14,11 +14,18 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
+from typing import Any
 
 from caps.bibformats import Person, Record
 from caps.httpfetch import HttpFetchError, RateLimiter, default_resolve, fetch
+from caps.probe import ProbeResult, fail, ok
 
 BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+
+# "测连接"用的探测 PMID：选一条确定稳定存在的老记录，只是为了验证能不能
+# 查通，不关心查到的具体内容。
+_PROBE_PMID = "30049270"
 
 _MONTHS = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
@@ -137,3 +144,28 @@ def _extract_doi(elocationid: str | None) -> str | None:
     if not elocationid.lower().startswith("doi"):
         return None
     return _DOI_PREFIX_RE.sub("", elocationid).strip() or None
+
+
+def check(
+    config: Mapping[str, Any] | None,
+    *,
+    transport=None,
+    resolve=default_resolve,
+) -> ProbeResult:
+    """满足 `caps.probe.CheckFn` 协议：测一次到 PubMed 的真实连通性。
+
+    `config` 只认 `api_key`——没有 key 也能测通（只是限速更严，不是访问
+    门槛），所以这个来源即使还没配凭据也应该能点"测试连接"。
+
+    `transport`/`resolve` 是测试钩子，原样转发给 `lookup_by_pmid`，生产
+    代码不传；和 `adapters.sources.crossref.check` 同一个理由，这两个额外
+    的可选关键字参数不影响这个函数满足 `CheckFn` 协议。
+    """
+    api_key = (config or {}).get("api_key")
+    try:
+        record = lookup_by_pmid(_PROBE_PMID, api_key=api_key, transport=transport, resolve=resolve)
+    except PubMedError as exc:
+        return fail(f"查询 PubMed 失败：{exc}")
+    if record is None:
+        return fail(f"测试 PMID 查无结果：{_PROBE_PMID}（这不代表凭据本身有问题，可能是索引变更）")
+    return ok(f"PubMed 连接正常（api_key={'已设置' if api_key else '未设置'}）", probe_pmid=_PROBE_PMID)
