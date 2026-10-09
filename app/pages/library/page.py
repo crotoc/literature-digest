@@ -1,13 +1,13 @@
-"""app/pages/library：文献库卷目列表 + 删除/回收站恢复。
+"""app/pages/library：文献库卷目列表 + 删除/回收站恢复 + 单篇打标签。
 
 v1 范围的刻意裁剪：读路径接 features/library_browse 的
 list_library_page()——按 view(all/trash) + 排序 + 分页浏览卡片列表。
-写路径目前只接 features/organizing 的软删/恢复两个单项操作（每张卡片一个
-删除/恢复按钮,work_ids=[单个 id]）。标签侧栏 AND 筛选、文件夹筛选、
-三态勾选/全选所有筛选结果、批量打标签/移文件夹、彻底删除、单篇编辑、
-附件上传/预览这些全部留给后续增量——批量操作要先有"选择集"这个前端状态
-才有意义,而「两处已定」第 2 条明确选择集的服务端解析是独立的一块,不该
-现在就为了删除按钮囫囵顺带做了。
+写路径目前只接 features/organizing 的单项操作（work_ids=[单个 id]）：
+软删/恢复、"顺手新建标签再打上"、去掉某一个标签。标签侧栏 AND 筛选、
+文件夹筛选、三态勾选/全选所有筛选结果、批量打标签/移文件夹、彻底删除、
+单篇编辑、附件上传/预览这些全部留给后续增量——批量操作要先有"选择集"这个
+前端状态才有意义,而「两处已定」第 2 条明确选择集的服务端解析是独立的
+一块,不该现在就为了这几个按钮囫囵顺带做了。
 
 URL 用 `/l/<name-slug>-<id>/`——只认尾部数字 id，slug 前缀纯装饰，不校验
 是否和库名匹配（库改名后旧链接依然能打开，不需要重定向）。
@@ -33,7 +33,7 @@ from features.library_browse import (
     VIEWS,
     list_library_page,
 )
-from features.organizing import bulk_restore, bulk_soft_delete
+from features.organizing import bulk_remove_tag, bulk_restore, bulk_soft_delete, create_tag_and_apply
 
 router = APIRouter()
 nav = NavItem(key="library", label="文献库", path="/library", icon="library", order=1)
@@ -156,4 +156,47 @@ def restore_work_route(
         return RedirectResponse("/login", status_code=303)
     library_id = _require_library(session, account.id, slug_and_id)
     bulk_restore(session, account_id=account.id, library_id=library_id, work_ids=[work_id])
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+@router.post("/l/{slug_and_id}/works/{work_id}/tags/add")
+def add_tag_route(
+    slug_and_id: str,
+    work_id: int,
+    name: str = Form(""),
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    if name.strip():
+        # 空名字直接忽略、不报错——这页目前没有"操作失败请提示"这套机制，
+        # 和删除/恢复按钮一样；真要做统一在后续增量一起加。
+        create_tag_and_apply(
+            session, account_id=account.id, library_id=library_id, work_ids=[work_id], name=name
+        )
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+@router.post("/l/{slug_and_id}/works/{work_id}/tags/{tag_id}/remove")
+def remove_tag_route(
+    slug_and_id: str,
+    work_id: int,
+    tag_id: int,
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    bulk_remove_tag(session, account_id=account.id, library_id=library_id, work_ids=[work_id], tag_id=tag_id)
     return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)

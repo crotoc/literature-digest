@@ -139,3 +139,52 @@ def test_delete_requires_login(client):
     response = client.post(f"{library_url}works/{work_id}/delete", data={"view": "all"})
 
     assert str(response.url).endswith("/login")
+
+
+# ── 打标签 / 去标签 ──────────────────────────────────────────────────────
+
+
+def test_add_tag_then_remove_tag(client):
+    _register(client, username="tina", email="tina@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    add_response = client.post(
+        f"{library_url}works/{work_id}/tags/add",
+        data={
+            "name": "machine-learning",
+            "view": "all",
+            "sort_by": "updated_at",
+            "sort_dir": "desc",
+            "page": "1",
+        },
+    )
+    assert add_response.status_code == 200
+    assert "machine-learning" in add_response.text
+
+    tag_id_match = re.search(r"tags/(\d+)/remove", add_response.text)
+    assert tag_id_match is not None, add_response.text
+    tag_id = int(tag_id_match.group(1))
+
+    remove_response = client.post(
+        f"{library_url}works/{work_id}/tags/{tag_id}/remove",
+        data={"view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+    assert remove_response.status_code == 200
+    assert "machine-learning" not in remove_response.text
+
+
+def test_add_tag_with_blank_name_is_a_no_op(client):
+    _register(client, username="uma", email="uma@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{library_url}works/{work_id}/tags/add",
+        data={"name": "   ", "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    assert response.status_code == 200
+    assert "tag-chip" not in response.text

@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block title %}文献库 · literature-digest{% endblock %}
 {% block container_class %}container-wide{% endblock %}
+{% macro hidden_state() %}
+  <input type="hidden" name="view" value="{{ view }}">
+  <input type="hidden" name="sort_by" value="{{ sort_by }}">
+  <input type="hidden" name="sort_dir" value="{{ sort_dir }}">
+  <input type="hidden" name="page" value="{{ page }}">
+{% endmacro %}
 {% block content %}
   <div class="library-toolbar">
     <div class="tabs">
@@ -37,11 +43,23 @@
           {% if card.work.year %} · {{ card.work.year }}{% endif %}
           {% if card.work.container_title %} · {{ card.work.container_title }}{% endif %}
         </p>
-        {% if card.tags %}
-          <p class="work-tags">
-            {% for tag in card.tags %}<span class="tag-chip">{{ tag.name }}</span>{% endfor %}
-          </p>
-        {% endif %}
+        <p class="work-tags">
+          {% for tag in card.tags %}
+            <span class="tag-chip">
+              {{ tag.name }}
+              <form method="post" class="tag-remove-form"
+                    action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/tags/{{ tag.id }}/remove">
+                {{ hidden_state() }}
+                <button type="submit" aria-label="移除标签 {{ tag.name }}">×</button>
+              </form>
+            </span>
+          {% endfor %}
+        </p>
+        <form method="post" class="tag-add-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/tags/add">
+          {{ hidden_state() }}
+          <input type="text" name="name" placeholder="新标签名" size="12">
+          <button type="submit" class="btn">打标签</button>
+        </form>
         {% if card.folders %}
           <p class="muted">
             文件夹：{% for folder in card.folders %}{{ folder.name }}{% if not loop.last %}, {% endif %}{% endfor %}
@@ -50,10 +68,7 @@
         <p class="muted">{{ card.attachments | length }} 个附件{% if card.note %} · 有笔记{% endif %}</p>
         <form method="post" class="work-actions"
               action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/{{ 'restore' if view == 'trash' else 'delete' }}">
-          <input type="hidden" name="view" value="{{ view }}">
-          <input type="hidden" name="sort_by" value="{{ sort_by }}">
-          <input type="hidden" name="sort_dir" value="{{ sort_dir }}">
-          <input type="hidden" name="page" value="{{ page }}">
+          {{ hidden_state() }}
           <button type="submit" class="btn">{{ "恢复" if view == "trash" else "移入回收站" }}</button>
         </form>
       </li>
