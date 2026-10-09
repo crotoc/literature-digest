@@ -1,0 +1,43 @@
+"""features/uploading。详见 contract.py。"""
+
+from features.uploading.contract import (
+    DEFAULT_MAX_BYTES,
+    DEFAULT_ON_CONFLICT,
+    JOB_KIND,
+    JOB_KIND_ITEM,
+    NAMING_TEMPLATE_SETTING_KEY,
+    ON_CONFLICT_POLICIES,
+    SETTINGS_MODULE,
+    BatchUploadResult,
+    FilenameConflict,
+    UploadInput,
+    UploadOutcome,
+    UploadRejected,
+    download_attachment,
+    remove_attachment,
+    resolve_naming_template,
+    set_naming_template,
+    upload_batch,
+    upload_file,
+)
+
+__all__ = [
+    "DEFAULT_MAX_BYTES",
+    "DEFAULT_ON_CONFLICT",
+    "JOB_KIND",
+    "JOB_KIND_ITEM",
+    "NAMING_TEMPLATE_SETTING_KEY",
+    "ON_CONFLICT_POLICIES",
+    "SETTINGS_MODULE",
+    "BatchUploadResult",
+    "FilenameConflict",
+    "UploadInput",
+    "UploadOutcome",
+    "UploadRejected",
+    "download_attachment",
+    "remove_attachment",
+    "resolve_naming_template",
+    "set_naming_template",
+    "upload_batch",
+    "upload_file",
+]
