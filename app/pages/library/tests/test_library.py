@@ -1586,3 +1586,111 @@ def test_cite_selection_requires_login(client):
     response = _cite_selection_post(client, library_url, work_ids=[work_id])
 
     assert str(response.url).endswith("/login")
+
+
+# ── 侧栏标签排序 ─────────────────────────────────────────────────────────
+
+
+def _move_tag_post(client, library_url, tag_id, direction):
+    return client.post(
+        f"{library_url}tags/{tag_id}/move",
+        data={"direction": direction, "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+
+def test_move_tag_up_swaps_with_previous_tag(client):
+    _register(client, username="move1", email="move1@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    _add_tag(client, library_url, work_id, "move-first")
+    second_id = _add_tag(client, library_url, work_id, "move-second")
+
+    response = _move_tag_post(client, library_url, second_id, "up")
+
+    assert response.status_code == 200
+    assert response.text.index("move-second") < response.text.index("move-first")
+
+
+def test_move_tag_down_swaps_with_next_tag(client):
+    _register(client, username="move2", email="move2@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    first_id = _add_tag(client, library_url, work_id, "move-first2")
+    _add_tag(client, library_url, work_id, "move-second2")
+
+    response = _move_tag_post(client, library_url, first_id, "down")
+
+    assert response.status_code == 200
+    assert response.text.index("move-second2") < response.text.index("move-first2")
+
+
+def test_move_tag_up_at_top_is_a_no_op(client):
+    _register(client, username="move3", email="move3@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    first_id = _add_tag(client, library_url, work_id, "move-top")
+    _add_tag(client, library_url, work_id, "move-bottom")
+
+    response = _move_tag_post(client, library_url, first_id, "up")
+
+    assert response.status_code == 200
+    assert response.text.index("move-top") < response.text.index("move-bottom")
+
+
+def test_move_tag_down_at_bottom_is_a_no_op(client):
+    _register(client, username="move4", email="move4@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    _add_tag(client, library_url, work_id, "move-top2")
+    last_id = _add_tag(client, library_url, work_id, "move-bottom2")
+
+    response = _move_tag_post(client, library_url, last_id, "down")
+
+    assert response.status_code == 200
+    assert response.text.index("move-top2") < response.text.index("move-bottom2")
+
+
+def test_move_tag_rejects_invalid_direction(client):
+    _register(client, username="move5", email="move5@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    tag_id = _add_tag(client, library_url, work_id, "move-dir")
+
+    response = _move_tag_post(client, library_url, tag_id, "sideways")
+
+    assert response.status_code == 400
+
+
+def test_move_tag_rejects_tag_id_from_another_library(client):
+    _register(client, username="move6", email="move6@example.org")
+    move6_work_id = _import_sample(client)
+    move6_lib_response = client.get("/library")
+    move6_library_url = str(move6_lib_response.url).replace("http://testserver", "")
+    other_tag_id = _add_tag(client, move6_library_url, move6_work_id, "move6-tag")
+    client.post("/logout")
+
+    _register(client, username="move7", email="move7@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = _move_tag_post(client, library_url, other_tag_id, "up")
+
+    assert response.status_code == 404
+
+
+def test_move_tag_requires_login(client):
+    _register(client, username="move8", email="move8@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    tag_id = _add_tag(client, library_url, work_id, "move8-tag")
+    client.post("/logout")
+
+    response = _move_tag_post(client, library_url, tag_id, "up")
+
+    assert str(response.url).endswith("/login")

@@ -103,7 +103,7 @@ from domain.accounts import AccountDTO
 from domain.attachments import AttachmentDTO, AttachmentNotFound, get_attachment, set_main_attachment
 from domain.folders import FolderNotFound, list_folders
 from domain.libraries import LibraryDTO, LibraryNotFound, list_libraries_for_account, resolve_scope
-from domain.tags import TagNotFound, list_tags
+from domain.tags import TagNotFound, list_tags, reorder_tags
 from domain.works import WorkNotFound, get_work, list_work_ids
 from features.annotating import set_work_note, update_metadata
 from features.exporting import (
@@ -405,6 +405,49 @@ def remove_tag_route(
         return RedirectResponse("/login", status_code=303)
     library_id = _require_library(session, account.id, slug_and_id)
     bulk_remove_tag(session, account_id=account.id, library_id=library_id, work_ids=[work_id], tag_id=tag_id)
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+@router.post("/l/{slug_and_id}/tags/{tag_id}/move")
+def move_tag_route(
+    slug_and_id: str,
+    tag_id: int,
+    direction: str = Form(...),
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    """侧栏标签排序——计划里写的是"拖拽排序"，这里换成等价的 ↑/↓ 互换
+    相邻位置按钮：省掉拖拽需要的那段 JS（抓 dragstart/dragover/drop 事件、
+    算插入位置、再序列化成完整顺序回传），用户能达到的最终效果一样
+    （标签池通常几十个量级，逐个移动不是真实的使用障碍），和这个项目
+    其余页面"能用简单表单就不上复杂前端"的一贯做法一致。
+
+    `domain.tags.reorder_tags` 要求传入该库**全部**标签 id 的完整顺序
+    （不支持只传一个子集），所以这里先用 `list_tags` 取当前全量顺序，
+    把 `tag_id` 和它的相邻项互换位置后整份传回去——已经在队首/队尾时
+    `direction` 指向队外，直接不做改动，不报错。
+    """
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+
+    if direction not in {"up", "down"}:
+        raise HTTPException(status_code=400, detail=f"不认识的方向：{direction!r}")
+
+    current_order = [tag.id for tag in list_tags(session, library_id=library_id)]
+    if tag_id not in current_order:
+        raise HTTPException(status_code=404, detail="标签不存在或不属于这个文库")
+
+    index = current_order.index(tag_id)
+    neighbor = index - 1 if direction == "up" else index + 1
+    if 0 <= neighbor < len(current_order):
+        current_order[index], current_order[neighbor] = current_order[neighbor], current_order[index]
+        reorder_tags(session, library_id=library_id, tag_ids_in_order=current_order)
+
     return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
 
 
