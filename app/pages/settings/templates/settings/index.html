@@ -3,6 +3,10 @@
 {% block content %}
   <h2>设置</h2>
 
+  {% if error %}
+    <p class="alert alert-error">{{ error }}</p>
+  {% endif %}
+
   <h3>引用样式</h3>
   <p class="muted">文献库页面上每张卡片下面的格式化引用串按这个样式渲染。</p>
   <form method="post" action="/settings/citation-style" class="settings-form">
@@ -12,5 +16,66 @@
       {% endfor %}
     </select>
     <button type="submit" class="btn btn-primary">保存</button>
+  </form>
+
+  <h3>数据源凭据</h3>
+  <p class="muted">Crossref / PubMed 元数据查询用的访问凭据。</p>
+
+  {% if not connections %}
+    <p class="muted">还没有配置任何数据源凭据。</p>
+  {% endif %}
+
+  <ul class="connection-list">
+    {% for connection in connections %}
+      <li class="connection-row card">
+        <p>
+          <strong>{{ connection.name }}</strong>
+          <span class="muted">（{{ connection.config.source }}）</span>
+          {% if connection.is_default %}<span class="tag-chip">默认</span>{% endif %}
+          {% if not connection.enabled %}<span class="tag-chip">已停用</span>{% endif %}
+        </p>
+        {% if connection.last_checked_at %}
+          <p class="muted">
+            上次测试：{{ connection.last_checked_at }} ·
+            {% if connection.last_check_ok %}成功{% else %}失败：{{ connection.last_check_message }}{% endif %}
+          </p>
+        {% endif %}
+        <div class="connection-actions">
+          <form method="post" action="/settings/connections/{{ connection.id }}/toggle" class="connection-inline-form">
+            <button type="submit" class="btn">{{ "停用" if connection.enabled else "启用" }}</button>
+          </form>
+          {% if not connection.is_default %}
+            <form method="post" action="/settings/connections/{{ connection.id }}/set-default" class="connection-inline-form">
+              <button type="submit" class="btn">设为默认</button>
+            </form>
+          {% endif %}
+          <form method="post" action="/settings/connections/{{ connection.id }}/check" class="connection-inline-form">
+            <button type="submit" class="btn">测试连接</button>
+          </form>
+          {% if connection.config.source == "pubmed" %}
+            <form method="post" action="/settings/connections/{{ connection.id }}/rotate-key" class="connection-inline-form">
+              <input type="password" name="api_key" placeholder="新 API key" size="20" required>
+              <button type="submit" class="btn">更换 key</button>
+            </form>
+          {% endif %}
+          <form method="post" action="/settings/connections/{{ connection.id }}/delete" class="connection-inline-form">
+            <button type="submit" class="btn">删除</button>
+          </form>
+        </div>
+      </li>
+    {% endfor %}
+  </ul>
+
+  <h4>新建数据源凭据</h4>
+  <form method="post" action="/settings/connections/create" class="settings-form connection-create-form">
+    <select name="source">
+      {% for source in sources %}
+        <option value="{{ source }}">{{ source }}</option>
+      {% endfor %}
+    </select>
+    <input type="text" name="name" placeholder="连接名" required>
+    <input type="text" name="mailto" placeholder="mailto（仅 crossref）">
+    <input type="password" name="api_key" placeholder="API key（仅 pubmed）">
+    <button type="submit" class="btn btn-primary">新建</button>
   </form>
 {% endblock %}

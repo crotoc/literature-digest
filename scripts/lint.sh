@@ -125,6 +125,25 @@ else
           dependents=$(grep -rlE "(from|import)[[:space:]]+${modpath_re}\\b" --include='*.py' \
                          features/ domain/ 2>/dev/null \
                        | sed -E 's#^(features|domain)/([^/]+)/.*#\1/\2#' | sort -u)
+          # 上面只测到一层："哪个 features/domain 模块直接 import 这个
+          # adapter"。但 app/pages/<y> 直接 import 那个 features 模块是
+          # 完全合法的日常架构（页面调 feature 的 contract，和下面
+          # features/*/ 分支里 app/pages/auth 依赖 features/accounts_auth
+          # 是同一个道理）——如果不把这些页面也一起挪开，它们的顶层 import
+          # 会在 features 模块被挪走后失败，被误判成"删掉这个 adapter 波及
+          # 了无关模块"。所以这里再搜一层：对每个刚找到的 features/<x>
+          # 依赖方，再找直接 import 它的 app/pages/<y>，一并加入要挪开的
+          # 名单（domain/<x> 一般不会被 app/pages 直接按模块名 import 出
+          # 这种链式依赖，但同样搜一遍，统一处理不额外加分支）。
+          for dep in $dependents; do
+            dep_modpath=$(printf '%s' "$dep" | tr '/' '.')
+            dep_modpath_re=$(printf '%s' "$dep_modpath" | sed 's/\./\\./g')
+            page_dependents=$(grep -rlE "(from|import)[[:space:]]+${dep_modpath_re}\\b" --include='*.py' \
+                                 app/pages/ 2>/dev/null \
+                               | sed -E 's#^(app/pages)/([^/]+)/.*#\1/\2#' | sort -u)
+            dependents="$dependents $page_dependents"
+          done
+          dependents=$(printf '%s\n' $dependents | sort -u)
           ;;
         features/*/)
           # 同样的道理，这次是 app/pages/<y> 在模块顶层直接 import 了这个
