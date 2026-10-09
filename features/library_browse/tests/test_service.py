@@ -3,7 +3,7 @@ import pytest
 from domain.folders import add_work_to_folder, create_folder
 from domain.notes import set_note
 from domain.tags import add_tag_to_work, create_tag
-from domain.works import create_work, soft_delete_work
+from domain.works import add_identifier, create_work, soft_delete_work
 from features.library_browse.service import list_library_page, resolve_selection
 
 LIBRARY = 1
@@ -90,6 +90,7 @@ def test_list_library_page_expands_card_attachments(db):
     assert [f.name for f in card.folders] == ["2026 reading list"]
     assert card.note is not None and card.note.content == "重要"
     assert card.attachments == ()
+    assert card.identifiers == ()
 
 
 def test_list_library_page_card_note_is_none_when_absent(db):
@@ -97,6 +98,19 @@ def test_list_library_page_card_note_is_none_when_absent(db):
 
     page = list_library_page(db, library_id=LIBRARY)
     assert page.items[0].note is None
+
+
+def test_list_library_page_expands_card_identifiers(db):
+    work = _work(db, title="Has a DOI")
+    add_identifier(db, library_id=LIBRARY, work_id=work.id, scheme="doi", value="10.1000/xyz123")
+    add_identifier(db, library_id=LIBRARY, work_id=work.id, scheme="pmid", value="12345678")
+
+    page = list_library_page(db, library_id=LIBRARY)
+    card = page.items[0]
+    assert {(i.scheme, i.value) for i in card.identifiers} == {
+        ("doi", "10.1000/xyz123"),
+        ("pmid", "12345678"),
+    }
 
 
 # ── list_library_page：按标签 / 文件夹筛选 ───────────────────────────────────

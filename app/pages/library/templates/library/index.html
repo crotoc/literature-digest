@@ -161,6 +161,13 @@
           {% if card.work.year %} · {{ card.work.year }}{% endif %}
           {% if card.work.container_title %} · {{ card.work.container_title }}{% endif %}
         </p>
+        {% if card.identifiers %}
+          <p class="identifier-list muted">
+            {% for identifier in card.identifiers %}
+              <span class="identifier-chip">{{ identifier.scheme | upper }}: {{ identifier.value }}</span>
+            {% endfor %}
+          </p>
+        {% endif %}
         {% if card.work.abstract %}
           <details class="abstract-details">
             <summary>摘要</summary>

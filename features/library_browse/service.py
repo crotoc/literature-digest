@@ -18,7 +18,7 @@ from domain.attachments import AttachmentDTO, list_attachments_for_work
 from domain.folders import FolderDTO, get_folder, list_folders_for_work, list_work_ids_in_folder
 from domain.notes import WorkNoteDTO, list_notes_for_works
 from domain.tags import TagDTO, get_tag, list_tags_for_work, list_work_ids_for_tag
-from domain.works import WorkDTO, count_works, list_work_ids, list_works
+from domain.works import IdentifierDTO, WorkDTO, count_works, list_identifiers, list_work_ids, list_works
 
 SORT_KEYS = frozenset({"created_at", "updated_at", "year", "title"})
 DEFAULT_SORT_BY = "updated_at"
@@ -43,6 +43,7 @@ class LibraryCard:
     folders: tuple[FolderDTO, ...]
     attachments: tuple[AttachmentDTO, ...]
     note: WorkNoteDTO | None
+    identifiers: tuple[IdentifierDTO, ...]
 
 
 @dataclass(frozen=True)
@@ -166,6 +167,7 @@ def list_library_page(
             folders=tuple(list_folders_for_work(db, work.id)),
             attachments=tuple(list_attachments_for_work(db, work.id)),
             note=notes_by_work.get(work.id),
+            identifiers=tuple(list_identifiers(db, work.id)),
         )
         for work in works
     )

@@ -83,6 +83,16 @@ failed outcome、不中断其余项、不抛到页面层，和 `features/dedupe_
 下载）。`set_main_attachment` 同样只认 `attachment_id`、不核对
 `library_id`，复用已有的 `_require_attachment_in_library` 补上这道检查。
 
+卡片补了一行标识符展示（计划「② 引用」"复制 DOI / PubMed ID"）：
+`features.library_browse.LibraryCard` 这次加了 `identifiers` 字段
+（`domain.works.list_identifiers`，和 tags/folders/attachments 同一种
+N+1 展开方式），模板层按 scheme 原样列出（`DOI: 10.1000/xyz` 这种形式），
+`user-select: all` 让点一下就能整段选中复制，不额外做剪贴板 JS——和
+"复制 BibTeX/CSL-JSON 单条"目前也是靠下载链接而不是剪贴板按钮同一个
+克制程度。没有标识符就不渲染这块（和摘要块同一个"有才显示"的判断）。
+RIS 导入的 `DO` 字段已经在 `features.importing` 落成 `doi` 标识符，所以
+这块不需要新路由就能看到数据。
+
 卡片上的摘要展示（计划「⑤ 单篇操作」"摘要显示"）和"编辑元数据"是两个
 独立的点：后者此前已经做了（textarea 默认值回显），但折叠起来的编辑
 表单不适合当成"随手展开读一下摘要"的入口，所以模板层补了一个只读的

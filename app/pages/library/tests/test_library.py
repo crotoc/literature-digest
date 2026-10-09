@@ -459,6 +459,34 @@ def test_work_card_shows_abstract_when_present_and_hides_block_when_absent(clien
     assert "可展开阅读的摘要正文" in after_response.text
 
 
+def test_work_card_shows_doi_and_pmid_identifiers_from_import(client):
+    _register(client, username="idreader", email="idreader@example.org")
+    raw_text = (
+        "TY  - JOUR\n"
+        "TI  - Paper With Identifiers\n"
+        "PY  - 2021///\n"
+        "DO  - 10.1000/xyz123\n"
+        "ER  -\n"
+    )
+    client.post("/import", data={"format": "ris", "raw_text": raw_text})
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.get(library_url)
+    assert "identifier-list" in response.text
+    assert "DOI: 10.1000/xyz123" in response.text
+
+
+def test_work_card_hides_identifier_block_when_no_identifiers(client):
+    _register(client, username="noidreader", email="noidreader@example.org")
+    _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.get(library_url)
+    assert "identifier-list" not in response.text
+
+
 def test_edit_metadata_rejects_non_numeric_year(client):
     _register(client, username="brad", email="brad@example.org")
     work_id = _import_sample(client)
