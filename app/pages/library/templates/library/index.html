@@ -65,7 +65,15 @@
             文件夹：{% for folder in card.folders %}{{ folder.name }}{% if not loop.last %}, {% endif %}{% endfor %}
           </p>
         {% endif %}
-        <p class="muted">{{ card.attachments | length }} 个附件{% if card.note %} · 有笔记{% endif %}</p>
+        <p class="muted">{{ card.attachments | length }} 个附件</p>
+        <details class="note-details"{% if card.note %} open{% endif %}>
+          <summary>笔记{% if card.note %}（已有）{% else %}（还没有）{% endif %}</summary>
+          <form method="post" class="note-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/note">
+            {{ hidden_state() }}
+            <textarea name="content" rows="3" placeholder="写点什么……清空并保存会删掉这条笔记">{{ card.note.content if card.note else "" }}</textarea>
+            <button type="submit" class="btn">保存笔记</button>
+          </form>
+        </details>
         <form method="post" class="work-actions"
               action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/{{ 'restore' if view == 'trash' else 'delete' }}">
           {{ hidden_state() }}

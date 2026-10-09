@@ -188,3 +188,73 @@ def test_add_tag_with_blank_name_is_a_no_op(client):
 
     assert response.status_code == 200
     assert "tag-chip" not in response.text
+
+
+# ── 笔记 ─────────────────────────────────────────────────────────────────
+
+
+def test_save_note_then_update_it(client):
+    _register(client, username="vince", email="vince@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    save_response = client.post(
+        f"{library_url}works/{work_id}/note",
+        data={
+            "content": "第一版笔记",
+            "view": "all",
+            "sort_by": "updated_at",
+            "sort_dir": "desc",
+            "page": "1",
+        },
+    )
+    assert save_response.status_code == 200
+    assert "第一版笔记" in save_response.text
+    assert "笔记（已有）" in save_response.text
+
+    update_response = client.post(
+        f"{library_url}works/{work_id}/note",
+        data={
+            "content": "改过的笔记",
+            "view": "all",
+            "sort_by": "updated_at",
+            "sort_dir": "desc",
+            "page": "1",
+        },
+    )
+    assert "改过的笔记" in update_response.text
+    assert "第一版笔记" not in update_response.text
+
+
+def test_clearing_note_content_deletes_it(client):
+    _register(client, username="wade", email="wade@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    client.post(
+        f"{library_url}works/{work_id}/note",
+        data={"content": "先写一条", "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    clear_response = client.post(
+        f"{library_url}works/{work_id}/note",
+        data={"content": "   ", "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    assert clear_response.status_code == 200
+    assert "先写一条" not in clear_response.text
+    assert "笔记（还没有）" in clear_response.text
+
+
+def test_save_note_requires_login(client):
+    _register(client, username="xena", email="xena@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    response = client.post(f"{library_url}works/{work_id}/note", data={"content": "不该成功"})
+
+    assert str(response.url).endswith("/login")

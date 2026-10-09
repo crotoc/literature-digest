@@ -1,13 +1,16 @@
-"""app/pages/library：文献库卷目列表 + 删除/回收站恢复 + 单篇打标签。
+"""app/pages/library：文献库卷目列表 + 删除/回收站恢复 + 单篇打标签/笔记。
 
 v1 范围的刻意裁剪：读路径接 features/library_browse 的
 list_library_page()——按 view(all/trash) + 排序 + 分页浏览卡片列表。
 写路径目前只接 features/organizing 的单项操作（work_ids=[单个 id]）：
-软删/恢复、"顺手新建标签再打上"、去掉某一个标签。标签侧栏 AND 筛选、
-文件夹筛选、三态勾选/全选所有筛选结果、批量打标签/移文件夹、彻底删除、
-单篇编辑、附件上传/预览这些全部留给后续增量——批量操作要先有"选择集"这个
-前端状态才有意义,而「两处已定」第 2 条明确选择集的服务端解析是独立的
-一块,不该现在就为了这几个按钮囫囵顺带做了。
+软删/恢复、"顺手新建标签再打上"、去掉某一个标签；外加 features/annotating
+的笔记读写（list_library_page 的 LibraryCard 已经带了 note 字段，省了
+一次额外查询）。标签侧栏 AND 筛选、文件夹筛选、三态勾选/全选所有筛选
+结果、批量打标签/移文件夹、彻底删除、元数据编辑、附件上传/预览这些全部
+留给后续增量——批量操作要先有"选择集"这个前端状态才有意义,而「两处已定」
+第 2 条明确选择集的服务端解析是独立的一块,不该现在就为了这几个按钮囫囵
+顺带做了;元数据编辑是 features/annotating 的另一半能力,和笔记不是同一个
+UI 决策,拆成单独一个增量。
 
 URL 用 `/l/<name-slug>-<id>/`——只认尾部数字 id，slug 前缀纯装饰，不校验
 是否和库名匹配（库改名后旧链接依然能打开，不需要重定向）。
@@ -24,6 +27,7 @@ from app.shell.templating import templates
 from caps.slug import slugify
 from domain.accounts import AccountDTO
 from domain.libraries import LibraryDTO, LibraryNotFound, list_libraries_for_account, resolve_scope
+from features.annotating import set_work_note
 from features.library_browse import (
     DEFAULT_PAGE_SIZE,
     DEFAULT_SORT_BY,
@@ -199,4 +203,26 @@ def remove_tag_route(
         return RedirectResponse("/login", status_code=303)
     library_id = _require_library(session, account.id, slug_and_id)
     bulk_remove_tag(session, account_id=account.id, library_id=library_id, work_ids=[work_id], tag_id=tag_id)
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+@router.post("/l/{slug_and_id}/works/{work_id}/note")
+def save_note_route(
+    slug_and_id: str,
+    work_id: int,
+    content: str = Form(""),
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    # 空白内容按"删这条笔记"处理——domain.notes.set_note 自己的语义是
+    # content=None 即删除；这里把"用户把文本框清空再保存"自然映射过去，
+    # 不需要单独一个"删除笔记"按钮。
+    set_work_note(session, library_id=library_id, work_id=work_id, content=content.strip() or None)
     return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)

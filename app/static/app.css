@@ -94,3 +94,12 @@ code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em
 .counts-table { border-collapse: collapse; margin: 1rem 0; }
 .counts-table td { padding: 0.25rem 1rem 0.25rem 0; }
 .outcome-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+
+.note-details { margin-top: 0.5rem; }
+.note-details summary { cursor: pointer; color: var(--muted); }
+.note-form { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.35rem; max-width: 32rem; }
+.note-form textarea {
+  padding: 0.5rem; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg); color: var(--fg); font: inherit; resize: vertical;
+}
+.note-form button { align-self: flex-start; }
