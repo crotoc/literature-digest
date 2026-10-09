@@ -1,4 +1,4 @@
-"""app/pages/library：文献库卷目列表 + 删除/回收站恢复 + 单篇打标签/文件夹/笔记/元数据编辑 + 导出/引用。
+"""app/pages/library：文献库卷目列表 + 删除/回收站恢复 + 单篇打标签/文件夹/笔记/元数据编辑/附件 + 导出/引用。
 
 v1 范围的刻意裁剪：读路径接 features/library_browse 的
 list_library_page()——按 view(all/trash) + 排序 + 分页浏览卡片列表。
@@ -20,10 +20,25 @@ id]）——它们内部已经用 `_check_work_scope` 校验了 work_id 真的�
 library_id（和 bulk_remove_tag 同一个安全模型），所以这两条路由不需要像
 笔记/元数据那样另外调 `_require_work_in_library`。标签侧栏 AND 筛选、文件
 夹筛选、三态勾选/全选所有筛选结果、批量打标签/移文件夹/编辑/导出（只导出
-选中项而不是整库）、彻底删除、附件上传/预览这些全部留给后续增量——批量
-操作要先有"选择集"
-这个前端状态才有意义,而「两处已定」第 2 条明确选择集的服务端解析是
-独立的一块,不该现在就为了这几个按钮囫囵顺带做了。
+选中项而不是整库）、彻底删除这些全部留给后续增量——批量操作要先有
+"选择集"这个前端状态才有意义,而「两处已定」第 2 条明确选择集的服务端
+解析是独立的一块,不该现在就为了这几个按钮囫囵顺带做了。
+
+附件这次只接 features/uploading 的单文件上传/下载/删除三个单项操作，
+`BlobStore` 实例由 app/shell/deps.py 的 `blob_store()` 依赖注入（装配层
+在启动时组出 `BlobStore(LocalFsBackend(...))`，caps/blobstore 自己不认识
+adapters/storage，这条线必须在这一层接）。v1 范围裁剪：不做"设为 Main
+PDF"（`domain.attachments.set_main_attachment`，这次 role 固定用默认值）、
+不做内嵌 PDF 阅读器（features/pdf_reading，下一个增量）、不做
+`webkitdirectory` 整目录批量上传（`upload_batch`，这次每次只传一个文件）、
+重名策略固定用默认的 `"rename"`（追加编号），不开 UI 让用户选
+ask/overwrite——那是"重名策略"这个独立决策，不该现在顺带定下来。
+`upload_file`/`remove_attachment`/`download_attachment` 三个函数都只认
+`attachment_id`、不核对它是不是真的属于传入的 `library_id`（`upload_file`
+内部会查 `work_id` 的库，但 `remove_attachment`/`download_attachment`
+两个连 `work_id` 都不查，直接拿 `attachment_id` 查改）——和
+`_require_work_in_library` 同一类问题，所以这里也在页面层补了
+`_require_attachment_in_library`。
 
 URL 用 `/l/<name-slug>-<id>/`——只认尾部数字 id，slug 前缀纯装饰，不校验
 是否和库名匹配（库改名后旧链接依然能打开，不需要重定向）。
@@ -31,15 +46,18 @@ URL 用 `/l/<name-slug>-<id>/`——只认尾部数字 id，slug 前缀纯装饰
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from urllib.parse import quote
 
-from app.shell.deps import current_account, db
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
+
+from app.shell.deps import blob_store, current_account, db
 from app.shell.registry import NavItem
 from app.shell.templating import templates
 from caps.bibformats import SUPPORTED_FORMATS
 from caps.slug import slugify
 from domain.accounts import AccountDTO
+from domain.attachments import AttachmentDTO, AttachmentNotFound, get_attachment
 from domain.folders import list_folders
 from domain.libraries import LibraryDTO, LibraryNotFound, list_libraries_for_account, resolve_scope
 from domain.works import WorkNotFound, get_work, list_work_ids
@@ -61,6 +79,13 @@ from features.organizing import (
     bulk_restore,
     bulk_soft_delete,
     create_tag_and_apply,
+)
+from features.uploading import (
+    FilenameConflict,
+    UploadRejected,
+    download_attachment,
+    remove_attachment,
+    upload_file,
 )
 
 router = APIRouter()
@@ -105,8 +130,33 @@ def _require_work_in_library(session, library_id: int, work_id: int):
     return work
 
 
+def _require_attachment_in_library(session, library_id: int, attachment_id: int) -> AttachmentDTO:
+    """`features.uploading.download_attachment`/`remove_attachment` 都只认
+    `attachment_id`，连 `work_id` 都不查——和 `_require_work_in_library` 同
+    一类问题，必须在页面层补上，否则账号 A 能对着自己的文库 URL、拿一个
+    属于账号 B 的 attachment_id 去下载/删除 B 的附件。
+    """
+    try:
+        attachment = get_attachment(session, attachment_id)
+    except AttachmentNotFound:
+        raise HTTPException(status_code=404, detail="附件不存在") from None
+    if attachment.library_id != library_id:
+        raise HTTPException(status_code=404, detail="附件不存在或不属于这个文库") from None
+    return attachment
+
+
 def _back_to_list(slug_and_id: str, *, view: str, sort_by: str, sort_dir: str, page: int) -> RedirectResponse:
     url = f"/l/{slug_and_id}/?view={view}&sort_by={sort_by}&sort_dir={sort_dir}&page={page}"
+    return RedirectResponse(url, status_code=303)
+
+
+def _back_to_list_with_error(
+    slug_and_id: str, *, view: str, sort_by: str, sort_dir: str, page: int, error: str
+) -> RedirectResponse:
+    url = (
+        f"/l/{slug_and_id}/?view={view}&sort_by={sort_by}&sort_dir={sort_dir}&page={page}"
+        f"&error={quote(error)}"
+    )
     return RedirectResponse(url, status_code=303)
 
 
@@ -130,6 +180,7 @@ def library_view(
     sort_by: str = DEFAULT_SORT_BY,
     sort_dir: str = DEFAULT_SORT_DIR,
     page: int = Query(1, ge=1),
+    error: str | None = None,
     account: AccountDTO | None = Depends(current_account),
     session=Depends(db),
 ):
@@ -189,6 +240,7 @@ def library_view(
             "sort_dir": sort_dir,
             "page": page,
             "total_pages": total_pages,
+            "error": error,
         },
     )
 
@@ -461,3 +513,88 @@ def cite_work_route(
         media_type=_EXPORT_CONTENT_TYPES[format],
         headers={"Content-Disposition": f'attachment; filename="work-{work_id}.{ext}"'},
     )
+
+
+@router.post("/l/{slug_and_id}/works/{work_id}/attachments/upload")
+def upload_attachment_route(
+    slug_and_id: str,
+    work_id: int,
+    file: UploadFile,
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+    store=Depends(blob_store),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    _require_work_in_library(session, library_id, work_id)
+
+    if not file.filename:
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error="没有选择文件"
+        )
+
+    try:
+        upload_file(
+            session,
+            library_id=library_id,
+            work_id=work_id,
+            filename=file.filename,
+            content=file.file,
+            blob_store=store,
+        )
+    except (UploadRejected, FilenameConflict) as error:
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error=error.message
+        )
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+@router.get("/l/{slug_and_id}/works/{work_id}/attachments/{attachment_id}/download")
+def download_attachment_route(
+    slug_and_id: str,
+    work_id: int,
+    attachment_id: int,
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+    store=Depends(blob_store),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    _require_work_in_library(session, library_id, work_id)
+    attachment = _require_attachment_in_library(session, library_id, attachment_id)
+
+    _, stream = download_attachment(session, attachment_id, blob_store=store)
+    return StreamingResponse(
+        stream,
+        media_type=attachment.content_type or "application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(attachment.filename)}"},
+    )
+
+
+@router.post("/l/{slug_and_id}/works/{work_id}/attachments/{attachment_id}/delete")
+def delete_attachment_route(
+    slug_and_id: str,
+    work_id: int,
+    attachment_id: int,
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+    store=Depends(blob_store),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    _require_work_in_library(session, library_id, work_id)
+    _require_attachment_in_library(session, library_id, attachment_id)
+
+    remove_attachment(session, attachment_id, blob_store=store)
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)

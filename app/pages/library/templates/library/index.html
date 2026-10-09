@@ -8,6 +8,10 @@
   <input type="hidden" name="page" value="{{ page }}">
 {% endmacro %}
 {% block content %}
+  {% if error %}
+    <p class="alert alert-error">{{ error }}</p>
+  {% endif %}
+
   <div class="library-toolbar">
     <div class="tabs">
       <a class="tab{% if view == 'all' %} is-active{% endif %}" href="?view=all">全部</a>
@@ -111,7 +115,30 @@
             <button type="submit" class="btn">加入</button>
           </form>
         {% endif %}
-        <p class="muted">{{ card.attachments | length }} 个附件</p>
+        <details class="attachment-details">
+          <summary>附件（{{ card.attachments | length }}）</summary>
+          <ul class="attachment-list">
+            {% for attachment in card.attachments %}
+              <li class="attachment-row">
+                <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/{{ attachment.id }}/download">
+                  {{ attachment.filename }}
+                </a>
+                <span class="muted">（{{ (attachment.size / 1024) | round(1) }} KB）</span>
+                <form method="post" class="attachment-delete-form"
+                      action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/{{ attachment.id }}/delete">
+                  {{ hidden_state() }}
+                  <button type="submit" aria-label="删除附件 {{ attachment.filename }}">×</button>
+                </form>
+              </li>
+            {% endfor %}
+          </ul>
+          <form method="post" class="attachment-upload-form" enctype="multipart/form-data"
+                action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/upload">
+            {{ hidden_state() }}
+            <input type="file" name="file" required>
+            <button type="submit" class="btn">上传附件</button>
+          </form>
+        </details>
         {% if view == 'all' %}
           {% set citation = citation_by_work_id.get(card.work.id) %}
           {% if citation %}

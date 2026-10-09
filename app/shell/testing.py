@@ -17,7 +17,10 @@ from contextlib import contextmanager
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.shell.deps import blob_store as blob_store_dependency
 from app.shell.deps import db as db_dependency
+from caps.blobstore import BlobStore
+from caps.blobstore.testing import MemoryBackend
 from infra.db import new_memory_session_factory
 
 
@@ -44,9 +47,20 @@ def test_client(app: FastAPI) -> Iterator[TestClient]:
         finally:
             session.close()
 
+    # 生产路径的 blob_store 真的落盘到 settings().blob_root——测试不能用
+    # 那一个，否则每次跑测试都会在真实的 data/blobs/ 下面堆测试文件。
+    # 这里同 db 一样换成 dependency_overrides，用 caps/blobstore/testing
+    # 的内存后端，每个 test_client() 调用一个全新实例，测试之间互不可见。
+    test_blob_store = BlobStore(MemoryBackend())
+
+    def _override_blob_store() -> BlobStore:
+        return test_blob_store
+
     app.dependency_overrides[db_dependency] = _override_db
+    app.dependency_overrides[blob_store_dependency] = _override_blob_store
     try:
         with TestClient(app) as client:
             yield client
     finally:
         app.dependency_overrides.pop(db_dependency, None)
+        app.dependency_overrides.pop(blob_store_dependency, None)

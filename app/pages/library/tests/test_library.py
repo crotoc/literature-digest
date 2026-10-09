@@ -591,3 +591,104 @@ def test_add_work_to_folder_requires_login(client):
     response = client.post(f"{library_url}works/{work_id}/folders/add", data={"folder_id": "1"})
 
     assert str(response.url).endswith("/login")
+
+
+# ── 附件 ─────────────────────────────────────────────────────────────────
+
+
+def test_upload_attachment_then_download_then_delete(client):
+    _register(client, username="vance4", email="vance4@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    upload_response = client.post(
+        f"{library_url}works/{work_id}/attachments/upload",
+        data={"view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+        files={"file": ("notes.txt", b"hello attachment", "text/plain")},
+    )
+    assert upload_response.status_code == 200
+    assert "notes.txt" in upload_response.text
+
+    attachment_id_match = re.search(r"attachments/(\d+)/download", upload_response.text)
+    assert attachment_id_match is not None, upload_response.text
+    attachment_id = int(attachment_id_match.group(1))
+
+    download_response = client.get(f"{library_url}works/{work_id}/attachments/{attachment_id}/download")
+    assert download_response.status_code == 200
+    assert download_response.content == b"hello attachment"
+
+    delete_response = client.post(
+        f"{library_url}works/{work_id}/attachments/{attachment_id}/delete",
+        data={"view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+    assert delete_response.status_code == 200
+    assert "notes.txt" not in delete_response.text
+
+
+def test_upload_attachment_requires_login(client):
+    _register(client, username="wendy4", email="wendy4@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    response = client.post(
+        f"{library_url}works/{work_id}/attachments/upload",
+        files={"file": ("notes.txt", b"hello", "text/plain")},
+    )
+
+    assert str(response.url).endswith("/login")
+
+
+def test_download_attachment_rejects_attachment_id_from_another_library(client):
+    # 和笔记/文件夹同一类问题：features.uploading.download_attachment 自己
+    # 不校验 attachment_id 是不是真的属于传入的 library_id——页面层的
+    # _require_attachment_in_library 挡这一层。
+    _register(client, username="xavier4", email="xavier4@example.org")
+    xavier_work_id = _import_sample(client)
+    xavier_lib_response = client.get("/library")
+    xavier_library_url = str(xavier_lib_response.url).replace("http://testserver", "")
+    upload_response = client.post(
+        f"{xavier_library_url}works/{xavier_work_id}/attachments/upload",
+        files={"file": ("secret.txt", b"xavier secret", "text/plain")},
+    )
+    attachment_id_match = re.search(r"attachments/(\d+)/download", upload_response.text)
+    assert attachment_id_match is not None, upload_response.text
+    attachment_id = int(attachment_id_match.group(1))
+    client.post("/logout")
+
+    _register(client, username="yolanda4", email="yolanda4@example.org")
+    yolanda_work_id = _import_sample(client)
+    yolanda_lib_response = client.get("/library")
+    yolanda_library_url = str(yolanda_lib_response.url).replace("http://testserver", "")
+
+    response = client.get(
+        f"{yolanda_library_url}works/{yolanda_work_id}/attachments/{attachment_id}/download"
+    )
+    assert response.status_code == 404
+
+
+def test_delete_attachment_rejects_attachment_id_from_another_library(client):
+    _register(client, username="zach4", email="zach4@example.org")
+    zach_work_id = _import_sample(client)
+    zach_lib_response = client.get("/library")
+    zach_library_url = str(zach_lib_response.url).replace("http://testserver", "")
+    upload_response = client.post(
+        f"{zach_library_url}works/{zach_work_id}/attachments/upload",
+        files={"file": ("zach.txt", b"zach secret", "text/plain")},
+    )
+    attachment_id_match = re.search(r"attachments/(\d+)/download", upload_response.text)
+    assert attachment_id_match is not None, upload_response.text
+    attachment_id = int(attachment_id_match.group(1))
+    client.post("/logout")
+
+    _register(client, username="amara4", email="amara4@example.org")
+    amara_work_id = _import_sample(client)
+    amara_lib_response = client.get("/library")
+    amara_library_url = str(amara_lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{amara_library_url}works/{amara_work_id}/attachments/{attachment_id}/delete"
+    )
+    assert response.status_code == 404

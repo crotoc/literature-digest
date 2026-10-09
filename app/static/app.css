@@ -131,3 +131,12 @@ code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em
   padding: 0.4rem; border: 1px solid var(--border); border-radius: 4px;
   background: var(--bg); color: var(--fg); font: inherit;
 }
+
+.attachment-list { list-style: none; padding: 0; margin: 0.5rem 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.attachment-row { display: flex; align-items: center; gap: 0.5rem; }
+.attachment-delete-form { display: inline; }
+.attachment-delete-form button {
+  border: none; background: none; cursor: pointer; opacity: 0.6; color: inherit; font: inherit;
+}
+.attachment-delete-form button:hover { opacity: 1; }
+.attachment-upload-form { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
