@@ -1187,3 +1187,111 @@ def test_batch_action_requires_login(client):
     response = _batch_post(client, library_url, action="delete", work_ids=[work_id])
 
     assert str(response.url).endswith("/login")
+
+
+# ── 整目录批量上传 ───────────────────────────────────────────────────────
+
+
+def test_upload_batch_directory_preserves_relative_paths_and_uploads_all_files(client):
+    _register(client, username="dir1", email="dir1@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{library_url}works/{work_id}/attachments/upload-batch",
+        files=[
+            ("files", ("a.pdf", b"%PDF-1.4 file a", "application/pdf")),
+            ("files", ("b.pdf", b"%PDF-1.4 file b", "application/pdf")),
+        ],
+        data={
+            "rel_paths": ["mydir/a.pdf", "mydir/sub/b.pdf"],
+            "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "a.pdf" in response.text
+    assert "b.pdf" in response.text
+    assert response.text.count("attachments/") >= 2
+
+
+def test_upload_batch_directory_isolates_failed_file_from_succeeded_ones(client):
+    _register(client, username="dir2", email="dir2@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    # upload_file 默认不限制 media type、不开 reject_damaged，唯一默认就会
+    # 拒绝的情形是超过 DEFAULT_MAX_BYTES（50MB）——用一个超限文件触发真实
+    # 的 UploadRejected，而不是假装某个扩展名/content-type 会被拒绝
+    # （这个项目目前没有按扩展名/类型的默认黑名单）。
+    oversized = b"x" * (50 * 1024 * 1024 + 1024)
+    response = client.post(
+        f"{library_url}works/{work_id}/attachments/upload-batch",
+        files=[
+            ("files", ("good.pdf", b"%PDF-1.4 ok", "application/pdf")),
+            ("files", ("too-big.bin", oversized, "application/octet-stream")),
+        ],
+        data={
+            "rel_paths": ["mydir/good.pdf", "mydir/too-big.bin"],
+            "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "good.pdf" in response.text
+    assert "失败" in response.text
+
+
+def test_upload_batch_directory_with_no_files_shows_error(client):
+    _register(client, username="dir3", email="dir3@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    # 真实浏览器在 <input webkitdirectory multiple> 没选任何文件时根本不会
+    # 带上 "files" 这个字段——这里用一个不相关的字段名强制 httpx 走
+    # multipart 编码，同时让路由收到的 files 参数保持默认空列表。
+    response = client.post(
+        f"{library_url}works/{work_id}/attachments/upload-batch",
+        files=[("_force_multipart", ("x.txt", b"x", "text/plain"))],
+        data={"view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    assert response.status_code == 200
+    assert "没有选择任何文件" in response.text
+
+
+def test_upload_batch_directory_requires_login(client):
+    _register(client, username="dir4", email="dir4@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    response = client.post(
+        f"{library_url}works/{work_id}/attachments/upload-batch",
+        files=[("files", ("a.pdf", b"%PDF-1.4", "application/pdf"))],
+        data={"view": "all"},
+    )
+
+    assert str(response.url).endswith("/login")
+
+
+def test_upload_batch_directory_rejects_work_id_from_another_library(client):
+    _register(client, username="dir5", email="dir5@example.org")
+    dir5_work_id = _import_sample(client)
+    client.post("/logout")
+
+    _register(client, username="dir6", email="dir6@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{library_url}works/{dir5_work_id}/attachments/upload-batch",
+        files=[("files", ("a.pdf", b"%PDF-1.4", "application/pdf"))],
+        data={"view": "all"},
+    )
+
+    assert response.status_code == 404

@@ -54,13 +54,14 @@ failed outcome、不中断其余项、不抛到页面层，和 `features/dedupe_
 （只导出选中项而不是整库）、`cite_keys`/`cite_latex` 批量引用复制，
 仍然和"全选所有筛选结果"一起留给下一个增量。
 
-附件这次只接 features/uploading 的单文件上传/下载/删除三个单项操作，
-`BlobStore` 实例由 app/shell/deps.py 的 `blob_store()` 依赖注入（装配层
-在启动时组出 `BlobStore(LocalFsBackend(...))`，caps/blobstore 自己不认识
-adapters/storage，这条线必须在这一层接）。v1 范围裁剪：不做
-`webkitdirectory` 整目录批量上传（`upload_batch`，这次每次只传一个文件）、
-重名策略固定用默认的 `"rename"`（追加编号），不开 UI 让用户选
-ask/overwrite——那是"重名策略"这个独立决策，不该现在顺带定下来。
+附件接 features/uploading 的单文件上传/整目录批量上传/下载/删除四个
+操作，`BlobStore` 实例由 app/shell/deps.py 的 `blob_store()` 依赖注入
+（装配层在启动时组出 `BlobStore(LocalFsBackend(...))`，caps/blobstore
+自己不认识 adapters/storage，这条线必须在这一层接）。`webkitdirectory`
+整目录批量上传接的是 `upload_batch`（保留相对路径，父 job + 每文件
+独立成败，瞬时批量粒度），v1 范围裁剪：重名策略固定用默认的
+`"rename"`（追加编号），不开 UI 让用户选 ask/overwrite——那是"重名
+策略"这个独立决策，不该现在顺带定下来。
 `upload_file`/`remove_attachment`/`download_attachment` 三个函数都只认
 `attachment_id`、不核对它是不是真的属于传入的 `library_id`（`upload_file`
 内部会查 `work_id` 的库，但 `remove_attachment`/`download_attachment`
@@ -127,9 +128,11 @@ from features.organizing import (
 from features.pdf_reading import VIEWABLE_CONTENT_TYPES, NotViewable, open_for_view
 from features.uploading import (
     FilenameConflict,
+    UploadInput,
     UploadRejected,
     download_attachment,
     remove_attachment,
+    upload_batch,
     upload_file,
 )
 
@@ -638,6 +641,63 @@ def upload_attachment_route(
     except (UploadRejected, FilenameConflict) as error:
         return _back_to_list_with_error(
             slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error=error.message
+        )
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+@router.post("/l/{slug_and_id}/works/{work_id}/attachments/upload-batch")
+def upload_attachment_batch_route(
+    slug_and_id: str,
+    work_id: int,
+    files: list[UploadFile] = [],
+    rel_paths: list[str] = Form([]),
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+    store=Depends(blob_store),
+):
+    """整目录批量上传（`<input webkitdirectory>`）——保留目录相对路径，
+    接 `features.uploading.upload_batch`（已经按"瞬时批量"规则做好了父
+    job + 每个文件独立成败，一个坏文件不影响其它文件继续上传）。
+
+    `rel_paths` 是页面 JS 读每个 `file.webkitRelativePath` 后，和 `files`
+    按同样的顺序逐个 `append` 进同一个 FormData 的并行数组——浏览器按
+    append 顺序排列同名字段，两个数组天然按下标对齐，所以先 `zip` 再按
+    `filename` 过滤掉空文件项，不会错位。单文件上传路由的"没有选文件"
+    判断（`error.message`）以及按库校验 work_id 的 `_require_work_in_library`
+    都是同一套，这条路由只是把 `upload_file` 换成接收一批 `UploadInput`
+    的 `upload_batch`，内部每个文件的 `UploadRejected`/`FilenameConflict`
+    已经被 `upload_batch` 自己接住记成失败项，不会抛到这一层。
+    """
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    _require_work_in_library(session, library_id, work_id)
+
+    padded_rel_paths = rel_paths + [""] * max(0, len(files) - len(rel_paths))
+    items = [
+        UploadInput(filename=file.filename, content=file.file, rel_path=(rel_path or None))
+        for file, rel_path in zip(files, padded_rel_paths)
+        if file.filename
+    ]
+    if not items:
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error="没有选择任何文件"
+        )
+
+    result = upload_batch(
+        session, account_id=account.id, library_id=library_id, work_id=work_id,
+        files=items, blob_store=store,
+    )
+    failed = sum(1 for outcome in result.outcomes if outcome.status == "failed")
+    if failed:
+        done = len(result.outcomes) - failed
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page,
+            error=f"批量上传完成：{done} 个文件成功，{failed} 个失败",
         )
     return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
 

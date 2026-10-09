@@ -222,6 +222,13 @@
             <input type="file" name="file" required>
             <button type="submit" class="btn">上传附件</button>
           </form>
+          <form method="post" class="attachment-upload-form" enctype="multipart/form-data"
+                action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/upload-batch"
+                onsubmit="__prepRelPaths(this); return true;">
+            {{ hidden_state() }}
+            <input type="file" name="files" webkitdirectory multiple required>
+            <button type="submit" class="btn">整目录上传</button>
+          </form>
         </details>
         {% if view == 'all' %}
           {% set citation = citation_by_work_id.get(card.work.id) %}
@@ -261,4 +268,20 @@
       <a href="?view={{ view }}&sort_by={{ sort_by }}&sort_dir={{ sort_dir }}&page={{ page + 1 }}">下一页 →</a>
     {% endif %}
   </nav>
+{% endblock %}
+{% block body_end %}
+  <script>
+    function __prepRelPaths(form) {
+      var fileInput = form.querySelector('input[type="file"]');
+      if (!fileInput) { return; }
+      form.querySelectorAll('input[name="rel_paths"]').forEach(function (el) { el.remove(); });
+      Array.prototype.forEach.call(fileInput.files, function (file) {
+        var hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.name = 'rel_paths';
+        hidden.value = file.webkitRelativePath || file.name;
+        form.appendChild(hidden);
+      });
+    }
+  </script>
 {% endblock %}
