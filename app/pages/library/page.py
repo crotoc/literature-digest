@@ -1,4 +1,4 @@
-"""app/pages/library：文献库卷目列表 + 删除/回收站恢复 + 单篇打标签/笔记/元数据编辑 + 导出/引用。
+"""app/pages/library：文献库卷目列表 + 删除/回收站恢复 + 单篇打标签/文件夹/笔记/元数据编辑 + 导出/引用。
 
 v1 范围的刻意裁剪：读路径接 features/library_browse 的
 list_library_page()——按 view(all/trash) + 排序 + 分页浏览卡片列表。
@@ -15,9 +15,14 @@ list_library_page()——按 view(all/trash) + 排序 + 分页浏览卡片列表
 `resolve_citation_style`/`set_default_citation_style`；LaTeX
 LaTeX cite 命令/citation key 复制是多选批量场景（`cite_keys`/`cite_latex`
 天生接收一组 work_ids），和这页目前全是单篇操作的调法不是一回事，留给
-批量/选择集机制落地之后。标签侧栏 AND 筛选、文件夹筛选、三态勾选/全选
-所有筛选结果、批量打标签/移文件夹/编辑/导出（只导出选中项而不是整库）、
-彻底删除、附件上传/预览这些全部留给后续增量——批量操作要先有"选择集"
+批量/选择集机制落地之后。单篇加入/移出文件夹接的也是 features/organizing
+的单项操作（`bulk_add_to_folder`/`bulk_remove_from_folder`，work_ids=[单个
+id]）——它们内部已经用 `_check_work_scope` 校验了 work_id 真的属于传入的
+library_id（和 bulk_remove_tag 同一个安全模型），所以这两条路由不需要像
+笔记/元数据那样另外调 `_require_work_in_library`。标签侧栏 AND 筛选、文件
+夹筛选、三态勾选/全选所有筛选结果、批量打标签/移文件夹/编辑/导出（只导出
+选中项而不是整库）、彻底删除、附件上传/预览这些全部留给后续增量——批量
+操作要先有"选择集"
 这个前端状态才有意义,而「两处已定」第 2 条明确选择集的服务端解析是
 独立的一块,不该现在就为了这几个按钮囫囵顺带做了。
 
@@ -36,6 +41,7 @@ from app.shell.templating import templates
 from caps.bibformats import SUPPORTED_FORMATS
 from caps.slug import slugify
 from domain.accounts import AccountDTO
+from domain.folders import list_folders
 from domain.libraries import LibraryDTO, LibraryNotFound, list_libraries_for_account, resolve_scope
 from domain.works import WorkNotFound, get_work, list_work_ids
 from features.annotating import set_work_note, update_metadata
@@ -49,7 +55,14 @@ from features.library_browse import (
     VIEWS,
     list_library_page,
 )
-from features.organizing import bulk_remove_tag, bulk_restore, bulk_soft_delete, create_tag_and_apply
+from features.organizing import (
+    bulk_add_to_folder,
+    bulk_remove_from_folder,
+    bulk_remove_tag,
+    bulk_restore,
+    bulk_soft_delete,
+    create_tag_and_apply,
+)
 
 router = APIRouter()
 nav = NavItem(key="library", label="文献库", path="/library", icon="library", order=1)
@@ -157,6 +170,10 @@ def library_view(
             card.work.id: cite_formatted(session, work_id=card.work.id) for card in library_page.items
         }
 
+    # 给每张卡片"加入文件夹"下拉用——库内文件夹数量级和标签池一样小，
+    # 一次查询够用，不需要为此单开 features 函数。
+    folders = list_folders(session, library_id=library_id)
+
     return templates.TemplateResponse(
         request,
         "library/index.html",
@@ -165,6 +182,7 @@ def library_view(
             "slug_and_id": slug_and_id,
             "library_page": library_page,
             "citation_by_work_id": citation_by_work_id,
+            "folders": folders,
             "view": view,
             "sort_by": sort_by,
             "sort_dir": sort_dir,
@@ -250,6 +268,65 @@ def remove_tag_route(
         return RedirectResponse("/login", status_code=303)
     library_id = _require_library(session, account.id, slug_and_id)
     bulk_remove_tag(session, account_id=account.id, library_id=library_id, work_ids=[work_id], tag_id=tag_id)
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+@router.post("/l/{slug_and_id}/works/{work_id}/folders/add")
+def add_folder_route(
+    slug_and_id: str,
+    work_id: int,
+    folder_id: str = Form(""),
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    # bulk_add_to_folder 内部的 _check_work_scope 校验不通过时抛的是裸
+    # ValueError（会变成未处理的 500），不是像 _require_work_in_library
+    # 这样的 HTTPException(404)——这里先自己查一遍，把跨库 work_id 这个
+    # 攻击面挡在页面层，和笔记/元数据路由统一成同一种失败方式。
+    _require_work_in_library(session, library_id, work_id)
+    folder_id_text = folder_id.strip()
+    if folder_id_text:
+        # 没选文件夹（下拉空值）直接忽略、不报错——和空标签名同一个尺度。
+        if not folder_id_text.isdigit():
+            raise HTTPException(status_code=400, detail="folder_id 不是合法的 id")
+        # folder_id 不属于这个库会从 bulk_add_to_folder 内部直接抛
+        # ValueError，和 tag_id 越界时的既有行为一致，不在这里额外兜底。
+        bulk_add_to_folder(
+            session,
+            account_id=account.id,
+            library_id=library_id,
+            work_ids=[work_id],
+            folder_id=int(folder_id_text),
+        )
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+@router.post("/l/{slug_and_id}/works/{work_id}/folders/{folder_id}/remove")
+def remove_folder_route(
+    slug_and_id: str,
+    work_id: int,
+    folder_id: int,
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    _require_work_in_library(session, library_id, work_id)
+    bulk_remove_from_folder(
+        session, account_id=account.id, library_id=library_id, work_ids=[work_id], folder_id=folder_id
+    )
     return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
 
 

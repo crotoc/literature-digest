@@ -87,10 +87,29 @@
           <input type="text" name="name" placeholder="新标签名" size="12">
           <button type="submit" class="btn">打标签</button>
         </form>
-        {% if card.folders %}
-          <p class="muted">
-            文件夹：{% for folder in card.folders %}{{ folder.name }}{% if not loop.last %}, {% endif %}{% endfor %}
-          </p>
+        <p class="work-folders">
+          {% for folder in card.folders %}
+            <span class="tag-chip">
+              {{ folder.name }}
+              <form method="post" class="tag-remove-form"
+                    action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/folders/{{ folder.id }}/remove">
+                {{ hidden_state() }}
+                <button type="submit" aria-label="从文件夹 {{ folder.name }} 移出">×</button>
+              </form>
+            </span>
+          {% endfor %}
+        </p>
+        {% if folders %}
+          <form method="post" class="tag-add-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/folders/add">
+            {{ hidden_state() }}
+            <select name="folder_id">
+              <option value="">加入文件夹……</option>
+              {% for folder in folders %}
+                <option value="{{ folder.id }}">{{ folder.name }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="btn">加入</button>
+          </form>
         {% endif %}
         <p class="muted">{{ card.attachments | length }} 个附件</p>
         {% if view == 'all' %}

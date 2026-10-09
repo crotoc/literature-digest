@@ -493,3 +493,101 @@ def test_cite_work_requires_login(client):
     response = client.get(f"{library_url}works/{work_id}/cite", params={"format": "ris"})
 
     assert str(response.url).endswith("/login")
+
+
+# ── 文件夹 ───────────────────────────────────────────────────────────────
+
+
+def test_add_work_to_folder_then_remove_it(client):
+    _register(client, username="quinn2", email="quinn2@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    create_response = client.post(
+        f"{library_url}folders/create", data={"name": "Methods4", "parent_folder_id": ""}
+    )
+    folder_id_match = re.search(r"folders/(\d+)/rename", create_response.text)
+    assert folder_id_match is not None, create_response.text
+    folder_id = int(folder_id_match.group(1))
+
+    add_response = client.post(
+        f"{library_url}works/{work_id}/folders/add",
+        data={
+            "folder_id": str(folder_id),
+            "view": "all",
+            "sort_by": "updated_at",
+            "sort_dir": "desc",
+            "page": "1",
+        },
+    )
+    assert add_response.status_code == 200
+    assert "Methods4" in add_response.text
+
+    remove_response = client.post(
+        f"{library_url}works/{work_id}/folders/{folder_id}/remove",
+        data={"view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+    assert remove_response.status_code == 200
+    # "Methods4" 本身还会出现在"加入文件夹……"下拉里（文件夹没被删，只是这篇
+    # 文献不再挂在它下面）——真正要确认的是这张卡片的文件夹 chip（带移出表单）
+    # 消失了，不是整页再也不出现这个名字。
+    assert f"folders/{folder_id}/remove" not in remove_response.text
+
+
+def test_add_work_to_folder_with_blank_selection_is_a_no_op(client):
+    _register(client, username="rory2", email="rory2@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{library_url}works/{work_id}/folders/add",
+        data={"folder_id": "", "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_add_work_to_folder_rejects_work_id_from_another_library(client):
+    # 和笔记路由同一类问题：features.organizing 的 bulk_add_to_folder 内部
+    # 校验 work_id 不通过时抛裸 ValueError（会变成未处理的 500），所以页面层
+    # 用 _require_work_in_library 先挡一遍，统一成 404——这里验证的就是这层
+    # 页面守卫，不是 organizing 自己的异常类型。
+    _register(client, username="sage2", email="sage2@example.org")
+    sage_work_id = _import_sample(client)
+    client.post("/logout")
+
+    _register(client, username="tara2", email="tara2@example.org")
+    tara_lib_response = client.get("/library")
+    tara_library_url = str(tara_lib_response.url).replace("http://testserver", "")
+    create_response = client.post(
+        f"{tara_library_url}folders/create", data={"name": "TaraFolder", "parent_folder_id": ""}
+    )
+    folder_id_match = re.search(r"folders/(\d+)/rename", create_response.text)
+    assert folder_id_match is not None, create_response.text
+    folder_id = int(folder_id_match.group(1))
+
+    response = client.post(
+        f"{tara_library_url}works/{sage_work_id}/folders/add",
+        data={
+            "folder_id": str(folder_id),
+            "view": "all",
+            "sort_by": "updated_at",
+            "sort_dir": "desc",
+            "page": "1",
+        },
+    )
+    assert response.status_code == 404
+
+
+def test_add_work_to_folder_requires_login(client):
+    _register(client, username="ursa2", email="ursa2@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    response = client.post(f"{library_url}works/{work_id}/folders/add", data={"folder_id": "1"})
+
+    assert str(response.url).endswith("/login")
