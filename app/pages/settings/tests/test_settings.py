@@ -1,4 +1,7 @@
+import json
 import re
+
+from app.shell.deps import log_file as log_file_dependency
 
 PASSWORD = "correct-horse-battery-staple"
 
@@ -178,3 +181,125 @@ def test_connection_mutations_reject_connection_id_from_another_account(client):
     for path in ("toggle", "set-default", "delete"):
         response = client.post(f"/settings/connections/{connection_id}/{path}")
         assert response.status_code == 404, path
+
+
+# ── 日志 ────────────────────────────────────────────────────────────────
+
+
+def _seed_log(client, tmp_path, entries):
+    """把 app/shell/deps.log_file 换成一个测试自己写的文件，绕开
+    app.shell.testing 默认分配的、测试代码摸不到的临时文件——这里的
+    entries 直接按 infra.logging.JsonFormatter 落盘的字段写，不走真实
+    的 logging 调用链（那条链路在应用启动时就绑定了生产配置的日志
+    文件，和这里的 dependency override 是两条独立路径，互不影响）。
+    """
+    log_path = tmp_path / "seeded.log"
+    with log_path.open("w", encoding="utf-8") as handle:
+        for entry in entries:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    client.app.dependency_overrides[log_file_dependency] = lambda: log_path
+    return log_path
+
+
+def test_logs_section_shows_empty_state_when_no_entries(client):
+    _register(client, username="noa9", email="noa9@example.org")
+
+    response = client.get("/settings")
+
+    assert response.status_code == 200
+    assert "没有匹配的日志条目" in response.text
+
+
+def test_logs_section_lists_seeded_entries(client, tmp_path):
+    _register(client, username="opal9", email="opal9@example.org")
+    _seed_log(
+        client,
+        tmp_path,
+        [
+            {"ts": "2026-01-01T00:00:00", "level": "INFO", "logger": "app", "msg": "hello-info-line"},
+            {"ts": "2026-01-01T00:00:01", "level": "ERROR", "logger": "app", "msg": "boom-error-line"},
+        ],
+    )
+
+    response = client.get("/settings")
+
+    assert "hello-info-line" in response.text
+    assert "boom-error-line" in response.text
+
+
+def test_logs_section_filters_by_min_level(client, tmp_path):
+    _register(client, username="pike9", email="pike9@example.org")
+    _seed_log(
+        client,
+        tmp_path,
+        [
+            {"ts": "2026-01-01T00:00:00", "level": "INFO", "logger": "app", "msg": "hello-info-line"},
+            {"ts": "2026-01-01T00:00:01", "level": "ERROR", "logger": "app", "msg": "boom-error-line"},
+        ],
+    )
+
+    response = client.get("/settings", params={"log_min_level": "ERROR"})
+
+    assert "boom-error-line" in response.text
+    assert "hello-info-line" not in response.text
+
+
+def test_logs_section_filters_by_search_text(client, tmp_path):
+    _register(client, username="quin9", email="quin9@example.org")
+    _seed_log(
+        client,
+        tmp_path,
+        [
+            {"ts": "2026-01-01T00:00:00", "level": "INFO", "logger": "app", "msg": "needle-in-haystack"},
+            {"ts": "2026-01-01T00:00:01", "level": "INFO", "logger": "app", "msg": "nothing-interesting"},
+        ],
+    )
+
+    response = client.get("/settings", params={"log_search": "needle"})
+
+    assert "needle-in-haystack" in response.text
+    assert "nothing-interesting" not in response.text
+
+
+def test_clear_log_route_empties_the_file_and_shows_notice(client, tmp_path):
+    _register(client, username="ruth9", email="ruth9@example.org")
+    log_path = _seed_log(
+        client,
+        tmp_path,
+        [{"ts": "2026-01-01T00:00:00", "level": "INFO", "logger": "app", "msg": "to-be-cleared"}],
+    )
+
+    response = client.post("/settings/logs/clear")
+
+    assert response.status_code == 200
+    assert "已清空日志" in response.text
+    assert "to-be-cleared" not in response.text
+    assert log_path.read_text(encoding="utf-8") == ""
+
+
+def test_export_log_route_returns_filtered_jsonl(client, tmp_path):
+    _register(client, username="sana9", email="sana9@example.org")
+    _seed_log(
+        client,
+        tmp_path,
+        [
+            {"ts": "2026-01-01T00:00:00", "level": "INFO", "logger": "app", "msg": "info-only-line"},
+            {"ts": "2026-01-01T00:00:01", "level": "ERROR", "logger": "app", "msg": "error-only-line"},
+        ],
+    )
+
+    response = client.get("/settings/logs/export", params={"log_min_level": "ERROR"})
+
+    assert response.status_code == 200
+    assert "error-only-line" in response.text
+    assert "info-only-line" not in response.text
+    assert "app-log-export.jsonl" in response.headers["content-disposition"]
+
+
+def test_log_routes_require_login(client):
+    _register(client, username="theo9", email="theo9@example.org")
+    client.post("/logout")
+
+    for method, path in (("post", "/settings/logs/clear"), ("get", "/settings/logs/export")):
+        response = getattr(client, method)(path)
+        assert str(response.url).endswith("/login"), path

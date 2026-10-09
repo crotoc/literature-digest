@@ -6,6 +6,9 @@
   {% if error %}
     <p class="alert alert-error">{{ error }}</p>
   {% endif %}
+  {% if notice %}
+    <p class="alert alert-notice">{{ notice }}</p>
+  {% endif %}
 
   <h3>引用样式</h3>
   <p class="muted">文献库页面上每张卡片下面的格式化引用串按这个样式渲染。</p>
@@ -78,4 +81,41 @@
     <input type="password" name="api_key" placeholder="API key（仅 pubmed）">
     <button type="submit" class="btn btn-primary">新建</button>
   </form>
+
+  <h3>日志</h3>
+  <p class="muted">应用运行日志（已脱敏），按级别/关键词筛选，最多显示最近 {{ log_entries|length }} 条。</p>
+
+  <form method="get" action="/settings" class="settings-form log-filter-form">
+    <select name="log_min_level">
+      <option value="" {% if not log_min_level %}selected{% endif %}>全部级别</option>
+      {% for level in log_levels %}
+        <option value="{{ level }}" {% if level == log_min_level %}selected{% endif %}>{{ level }}</option>
+      {% endfor %}
+    </select>
+    <input type="text" name="log_search" value="{{ log_search }}" placeholder="按消息内容搜索">
+    <button type="submit" class="btn">筛选</button>
+  </form>
+
+  <div class="log-actions">
+    <a class="btn" href="/settings/logs/export?log_min_level={{ log_min_level|urlencode }}&log_search={{ log_search|urlencode }}">导出</a>
+    <form method="post" action="/settings/logs/clear" class="log-inline-form">
+      <button type="submit" class="btn">清空日志</button>
+    </form>
+  </div>
+
+  {% if not log_entries %}
+    <p class="muted">没有匹配的日志条目。</p>
+  {% else %}
+    <ul class="log-entry-list">
+      {% for entry in log_entries %}
+        <li class="log-entry log-level-{{ entry.level|lower }}">
+          <span class="log-ts">{{ entry.ts }}</span>
+          <span class="tag-chip">{{ entry.level }}</span>
+          <span class="log-logger muted">{{ entry.logger }}</span>
+          <span class="log-msg">{{ entry.msg }}</span>
+          {% if entry.request_id %}<span class="muted">· {{ entry.request_id }}</span>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
 {% endblock %}

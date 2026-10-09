@@ -11,14 +11,17 @@ engine，lint 规则 6），但各页面的 HTTP 测试需要一个和开发库�
 写，避免 lint 的 grep 把本段说明文字本身误判成一处违规）。
 """
 
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.shell.deps import blob_store as blob_store_dependency
 from app.shell.deps import db as db_dependency
+from app.shell.deps import log_file as log_file_dependency
 from caps.blobstore import BlobStore
 from caps.blobstore.testing import MemoryBackend
 from infra.db import new_memory_session_factory
@@ -56,11 +59,26 @@ def test_client(app: FastAPI) -> Iterator[TestClient]:
     def _override_blob_store() -> BlobStore:
         return test_blob_store
 
-    app.dependency_overrides[db_dependency] = _override_db
-    app.dependency_overrides[blob_store_dependency] = _override_blob_store
-    try:
-        with TestClient(app) as client:
-            yield client
-    finally:
-        app.dependency_overrides.pop(db_dependency, None)
-        app.dependency_overrides.pop(blob_store_dependency, None)
+    # 同样的道理：`features/logs_viewer` 的 `clear_log()`/`export_log()`
+    # 操作的是 `app.shell.deps.log_file()` 指向的那一个文件——生产路径上
+    # 那是 `settings().log_file`，`tests/conftest.py` 没有单独配
+    # `LOG_FILE` 环境变量，会解析到和部署环境相同的默认路径。不换成临时
+    # 文件的话，跑一次测试就会把真实的 `data/app.log` 清空、写进测试数据。
+    # 每个 `test_client()` 调用用一个全新的临时目录，测试之间互不可见；
+    # `TemporaryDirectory` 跟着这个 contextmanager 的生命周期自动清理。
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        test_log_file = Path(tmp_dir) / "test.log"
+
+        def _override_log_file() -> Path:
+            return test_log_file
+
+        app.dependency_overrides[db_dependency] = _override_db
+        app.dependency_overrides[blob_store_dependency] = _override_blob_store
+        app.dependency_overrides[log_file_dependency] = _override_log_file
+        try:
+            with TestClient(app) as client:
+                yield client
+        finally:
+            app.dependency_overrides.pop(db_dependency, None)
+            app.dependency_overrides.pop(blob_store_dependency, None)
+            app.dependency_overrides.pop(log_file_dependency, None)

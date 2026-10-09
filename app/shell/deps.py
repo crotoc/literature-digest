@@ -5,6 +5,7 @@ service 层接收 Session、自己不造 session（四件套约定）；
 """
 
 from collections.abc import Iterator
+from pathlib import Path
 
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
@@ -47,6 +48,16 @@ def blob_store() -> BlobStore:
 
         _blob_store = BlobStore(LocalFsBackend(root=settings().blob_root))
     return _blob_store
+
+
+def log_file() -> Path:
+    """`features/logs_viewer` 操作的文件路径——走依赖注入而不是在页面层
+    直接调 `settings().log_file`，理由和 `blob_store()` 一样：测试要能
+    用 `app.dependency_overrides` 换成一个临时文件，否则 `clear_log()`
+    在跑测试时会把部署环境真实的 `data/app.log` 清空（`tests/conftest.py`
+    和生产 `.env` 都没有单独配 `LOG_FILE`，两者解析到的是同一个默认路径）。
+    """
+    return settings().log_file
 
 
 def db() -> Iterator[Session]:

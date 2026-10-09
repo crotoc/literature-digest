@@ -158,3 +158,18 @@ code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em
 .connection-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-top: 0.5rem; }
 .connection-inline-form { display: inline-flex; gap: 0.25rem; align-items: center; }
 .connection-create-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.5rem; }
+
+.alert-notice { background: color-mix(in srgb, #2563eb 12%, transparent); color: #2563eb; }
+
+.log-filter-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.log-actions { display: flex; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
+.log-inline-form { display: inline-flex; }
+.log-entry-list {
+  list-style: none; padding: 0; margin: 0.5rem 0; display: flex; flex-direction: column; gap: 0.25rem;
+  font-family: monospace; font-size: 0.85rem; max-height: 480px; overflow-y: auto;
+}
+.log-entry { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.15rem 0; border-bottom: 1px solid var(--border); }
+.log-ts { color: var(--muted); flex-shrink: 0; }
+.log-msg { word-break: break-word; }
+.log-level-error, .log-level-critical { color: #dc2626; }
+.log-level-warning { color: #d97706; }
