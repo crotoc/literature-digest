@@ -1,21 +1,25 @@
-"""app/pages/library：文献库卷目列表 + 删除/回收站恢复 + 单篇打标签/笔记/元数据编辑 + 整库导出。
+"""app/pages/library：文献库卷目列表 + 删除/回收站恢复 + 单篇打标签/笔记/元数据编辑 + 导出/引用。
 
 v1 范围的刻意裁剪：读路径接 features/library_browse 的
 list_library_page()——按 view(all/trash) + 排序 + 分页浏览卡片列表。
 写路径目前只接 features/organizing 的单项操作（work_ids=[单个 id]）：
 软删/恢复、"顺手新建标签再打上"、去掉某一个标签；外加 features/annotating
 的笔记读写（list_library_page 的 LibraryCard 已经带了 note 字段，省了
-一次额外查询）和标量元数据编辑（标题/年份/期刊或书名/摘要，authors 等
-结构化字段不在内）。导出目前只有"整个文库导出成一份 RIS/BibTeX/
-CSL-JSON 文本文件"（features.exporting.export_bibliography），不含附件
-的 ZIP 导出（要 features/uploading 落地的附件才有意义）、不含单条引用
-文本/格式化引用串复制（那是「两处已定」之外、页面梳理②的"引用"小节，
-和"导出整个文库"不是同一个 UI 决策，留给下一个增量）。标签侧栏 AND
-筛选、文件夹筛选、三态勾选/全选所有筛选结果、批量打标签/移文件夹/编辑/
-导出（只导出选中项而不是整库）、彻底删除、附件上传/预览这些全部留给
-后续增量——批量操作要先有"选择集"这个前端状态才有意义,而「两处已定」
-第 2 条明确选择集的服务端解析是独立的一块,不该现在就为了这几个按钮囫囵
-顺带做了。
+一次额外查询）、标量元数据编辑（标题/年份/期刊或书名/摘要，authors 等
+结构化字段不在内）、整库导出（RIS/BibTeX/CSL-JSON 文本文件）和单条
+引用（每张卡片下面一行格式化引用串 + 三种格式各自的下载链接）。
+
+刻意裁剪：导出不含附件的 ZIP（要 features/uploading 落地的附件才有
+意义）；格式化引用串固定用 `DEFAULT_CITATION_STYLE`（APA），账号级
+"改引用样式"的设置项要等设置页落地才能接上
+`resolve_citation_style`/`set_default_citation_style`；LaTeX
+LaTeX cite 命令/citation key 复制是多选批量场景（`cite_keys`/`cite_latex`
+天生接收一组 work_ids），和这页目前全是单篇操作的调法不是一回事，留给
+批量/选择集机制落地之后。标签侧栏 AND 筛选、文件夹筛选、三态勾选/全选
+所有筛选结果、批量打标签/移文件夹/编辑/导出（只导出选中项而不是整库）、
+彻底删除、附件上传/预览这些全部留给后续增量——批量操作要先有"选择集"
+这个前端状态才有意义,而「两处已定」第 2 条明确选择集的服务端解析是
+独立的一块,不该现在就为了这几个按钮囫囵顺带做了。
 
 URL 用 `/l/<name-slug>-<id>/`——只认尾部数字 id，slug 前缀纯装饰，不校验
 是否和库名匹配（库改名后旧链接依然能打开，不需要重定向）。
@@ -35,7 +39,7 @@ from domain.accounts import AccountDTO
 from domain.libraries import LibraryDTO, LibraryNotFound, list_libraries_for_account, resolve_scope
 from domain.works import WorkNotFound, get_work, list_work_ids
 from features.annotating import set_work_note, update_metadata
-from features.exporting import export_bibliography
+from features.exporting import cite_formatted, cite_record_text, export_bibliography
 from features.library_browse import (
     DEFAULT_PAGE_SIZE,
     DEFAULT_SORT_BY,
@@ -137,6 +141,22 @@ def library_view(
     )
     total_pages = max(1, -(-library_page.total // page_size))
 
+    # 逐条 N+1 查询——和 library_browse 自己给 tags/folders/attachments 用的
+    # 是同一个权衡（见它自己的 docstring）：一页几十条，批量版本不值得为此
+    # 多开一个 features/exporting 的函数。
+    #
+    # 只在 all 视图算：cite_formatted 内部调 domain.works.get_work 时不认
+    # include_deleted 这个参数（它自己没打算支持"引用一篇已经软删的文献"），
+    # trash 视图里全是软删条目，调了必定 WorkNotFound。这不是裁剪掉一个
+    # 真的能用的功能，是 features/exporting 这一层本来就没有这个能力——
+    # 回收站是"要不要恢复"的分流页，不是编辑/引用的地方，和下面模板里
+    # 笔记/元数据编辑面板只在 all 视图露出是同一个方向。
+    citation_by_work_id = {}
+    if view == "all":
+        citation_by_work_id = {
+            card.work.id: cite_formatted(session, work_id=card.work.id) for card in library_page.items
+        }
+
     return templates.TemplateResponse(
         request,
         "library/index.html",
@@ -144,6 +164,7 @@ def library_view(
             "active_nav": "library",
             "slug_and_id": slug_and_id,
             "library_page": library_page,
+            "citation_by_work_id": citation_by_work_id,
             "view": view,
             "sort_by": sort_by,
             "sort_dir": sort_dir,
@@ -335,4 +356,30 @@ def export_library_route(
         content=body,
         media_type=_EXPORT_CONTENT_TYPES[format],
         headers={"Content-Disposition": f'attachment; filename="library.{ext}"'},
+    )
+
+
+@router.get("/l/{slug_and_id}/works/{work_id}/cite")
+def cite_work_route(
+    slug_and_id: str,
+    work_id: int,
+    format: str = "ris",
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    _require_work_in_library(session, library_id, work_id)
+
+    if format not in SUPPORTED_FORMATS:
+        raise HTTPException(status_code=400, detail=f"不支持的导出格式：{format!r}")
+
+    body = cite_record_text(session, work_id=work_id, format=format)
+
+    ext = _EXPORT_EXTENSIONS[format]
+    return Response(
+        content=body,
+        media_type=_EXPORT_CONTENT_TYPES[format],
+        headers={"Content-Disposition": f'attachment; filename="work-{work_id}.{ext}"'},
     )

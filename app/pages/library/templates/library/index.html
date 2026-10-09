@@ -93,6 +93,18 @@
           </p>
         {% endif %}
         <p class="muted">{{ card.attachments | length }} 个附件</p>
+        {% if view == 'all' %}
+          {% set citation = citation_by_work_id.get(card.work.id) %}
+          {% if citation %}
+            <p class="citation-text muted">{{ citation }}</p>
+          {% endif %}
+          <p class="cite-links muted">
+            下载：
+            <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/cite?format=ris">RIS</a> ·
+            <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/cite?format=bibtex">BibTeX</a> ·
+            <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/cite?format=csljson">CSL-JSON</a>
+          </p>
+        {% endif %}
         <details class="note-details"{% if card.note %} open{% endif %}>
           <summary>笔记{% if card.note %}（已有）{% else %}（还没有）{% endif %}</summary>
           <form method="post" class="note-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/note">

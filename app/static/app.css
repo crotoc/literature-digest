@@ -113,3 +113,7 @@ code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em
   background: var(--bg); color: var(--fg); font: inherit; resize: vertical;
 }
 .edit-form button { align-self: flex-start; }
+
+.citation-text { font-style: italic; }
+.cite-links a { color: var(--accent); text-decoration: none; }
+.cite-links a:hover { text-decoration: underline; }

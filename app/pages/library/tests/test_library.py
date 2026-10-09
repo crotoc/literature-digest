@@ -431,3 +431,65 @@ def test_export_requires_login(client):
     response = client.get(f"{library_url}export", params={"format": "ris"})
 
     assert str(response.url).endswith("/login")
+
+
+# ── 单条引用 ─────────────────────────────────────────────────────────────
+
+
+def test_library_view_shows_formatted_citation_per_card(client):
+    _register(client, username="kara", email="kara@example.org")
+    _import_sample(client)
+
+    response = client.get("/library")
+
+    assert response.status_code == 200
+    assert "citation-text" in response.text
+
+
+def test_cite_work_downloads_single_record_in_each_format(client):
+    _register(client, username="liam2", email="liam2@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    for fmt in ("ris", "bibtex", "csljson"):
+        response = client.get(f"{library_url}works/{work_id}/cite", params={"format": fmt})
+        assert response.status_code == 200, (fmt, response.text)
+        assert "A Sample Paper" in response.text
+
+
+def test_cite_work_rejects_unsupported_format(client):
+    _register(client, username="mara", email="mara@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.get(f"{library_url}works/{work_id}/cite", params={"format": "docx"})
+
+    assert response.status_code == 400
+
+
+def test_cite_work_rejects_work_id_from_another_library(client):
+    _register(client, username="nico", email="nico@example.org")
+    nico_work_id = _import_sample(client)
+    client.post("/logout")
+
+    _register(client, username="opal", email="opal@example.org")
+    opal_lib_response = client.get("/library")
+    opal_library_url = str(opal_lib_response.url).replace("http://testserver", "")
+
+    response = client.get(f"{opal_library_url}works/{nico_work_id}/cite", params={"format": "ris"})
+
+    assert response.status_code == 404
+
+
+def test_cite_work_requires_login(client):
+    _register(client, username="priya", email="priya@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    response = client.get(f"{library_url}works/{work_id}/cite", params={"format": "ris"})
+
+    assert str(response.url).endswith("/login")
