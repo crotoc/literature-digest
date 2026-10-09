@@ -10,6 +10,7 @@ from domain.works.service import (
     WorkNotFound,
     add_identifier,
     add_relation,
+    count_works,
     create_work,
     find_by_identifier,
     find_candidates_by_title_year_key,
@@ -18,6 +19,7 @@ from domain.works.service import (
     list_identifiers,
     list_provenance,
     list_relations,
+    list_work_ids,
     list_works,
     purge_work,
     record_duplicate_candidate,
@@ -235,6 +237,108 @@ def test_list_works_limit_and_offset(db):
 
     page = list_works(db, library_id=LIBRARY, limit=2, offset=1)
     assert len(page) == 2
+
+
+def test_list_works_work_ids_filters_to_explicit_set(db):
+    a = _make_work(db, title="A")
+    _make_work(db, title="B")
+    c = _make_work(db, title="C")
+
+    works = list_works(db, library_id=LIBRARY, work_ids=[a.id, c.id])
+    assert {w.id for w in works} == {a.id, c.id}
+
+
+def test_list_works_work_ids_empty_list_means_no_candidates(db):
+    _make_work(db, title="A")
+
+    works = list_works(db, library_id=LIBRARY, work_ids=[])
+    assert works == []
+
+
+def test_list_works_sort_by_title_asc(db):
+    _make_work(db, title="Zebra")
+    _make_work(db, title="Apple")
+
+    works = list_works(db, library_id=LIBRARY, sort_by="title", sort_dir="asc")
+    assert [w.title for w in works] == ["Apple", "Zebra"]
+
+
+def test_list_works_sort_by_year_desc(db):
+    _make_work(db, title="Older", year=2010)
+    _make_work(db, title="Newer", year=2022)
+
+    works = list_works(db, library_id=LIBRARY, sort_by="year", sort_dir="desc")
+    assert [w.title for w in works] == ["Newer", "Older"]
+
+
+def test_list_works_deleted_only_returns_just_trashed(db):
+    kept = _make_work(db, title="Kept")
+    gone = _make_work(db, title="Gone")
+    soft_delete_work(db, gone.id)
+
+    works = list_works(db, library_id=LIBRARY, deleted_only=True)
+    assert [w.id for w in works] == [gone.id]
+    assert kept.id not in [w.id for w in works]
+
+
+def test_list_works_deleted_only_overrides_include_deleted(db):
+    _make_work(db, title="Kept")
+    gone = _make_work(db, title="Gone")
+    soft_delete_work(db, gone.id)
+
+    # deleted_only=True 时 include_deleted 的默认值不该让回收站视图漏看任何东西，
+    # 也不该被它意外放宽成"全都要"。
+    works = list_works(db, library_id=LIBRARY, include_deleted=False, deleted_only=True)
+    assert [w.id for w in works] == [gone.id]
+
+
+def test_list_works_rejects_unknown_sort_by(db):
+    with pytest.raises(ValueError, match="sort_by"):
+        list_works(db, library_id=LIBRARY, sort_by="first_author")
+
+
+def test_list_works_rejects_unknown_sort_dir(db):
+    with pytest.raises(ValueError, match="sort_dir"):
+        list_works(db, library_id=LIBRARY, sort_dir="sideways")
+
+
+def test_list_work_ids_scoped_and_excludes_deleted_by_default(db):
+    kept = _make_work(db, library_id=LIBRARY, title="Kept")
+    gone = _make_work(db, library_id=LIBRARY, title="Gone")
+    soft_delete_work(db, gone.id)
+    _make_work(db, library_id=OTHER_LIBRARY, title="Not mine")
+
+    assert list_work_ids(db, library_id=LIBRARY) == [kept.id]
+
+
+def test_list_work_ids_honors_work_ids_filter(db):
+    a = _make_work(db, title="A")
+    b = _make_work(db, title="B")
+
+    assert set(list_work_ids(db, library_id=LIBRARY, work_ids=[a.id])) == {a.id}
+    assert set(list_work_ids(db, library_id=LIBRARY, work_ids=[a.id, b.id])) == {a.id, b.id}
+
+
+def test_list_work_ids_deleted_only(db):
+    kept = _make_work(db, title="Kept")
+    gone = _make_work(db, title="Gone")
+    soft_delete_work(db, gone.id)
+
+    assert list_work_ids(db, library_id=LIBRARY, deleted_only=True) == [gone.id]
+    assert kept.id not in list_work_ids(db, library_id=LIBRARY, deleted_only=True)
+
+
+def test_count_works_matches_list_works_filters(db):
+    a = _make_work(db, title="A")
+    _make_work(db, title="B")
+    gone = _make_work(db, title="Gone")
+    soft_delete_work(db, gone.id)
+
+    assert count_works(db, library_id=LIBRARY) == 2
+    assert count_works(db, library_id=LIBRARY, include_deleted=True) == 3
+    assert count_works(db, library_id=LIBRARY, deleted_only=True) == 1
+    assert count_works(db, library_id=LIBRARY, work_ids=[a.id]) == 1
+    assert count_works(db, library_id=LIBRARY, work_ids=[]) == 0
 
 
 # ── 标识符 ────────────────────────────────────────────────────────────────

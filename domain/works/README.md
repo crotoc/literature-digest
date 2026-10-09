@@ -122,12 +122,37 @@ domain → caps 的依赖方向是架构允许的，`Person`（family/given/lite
 `_person_to_dict` / `_person_from_dict` 是仅在本模块内部用的转换细节，不对外
 暴露。
 
-### `list_works` 的排序为什么只有一个固定的 `updated_at desc`
+### `list_works` 的 `sort_by`/`work_ids`/`list_work_ids`/`count_works`：给 `features/library_browse` 开的口子，不是本模块自己要用
 
-更丰富的排序键白名单（年份/标题/第一作者）是 `features/library_browse`要加的
-下一层——那里才知道页面上到底暴露哪些排序选项、分页怎么配合。本模块先给一个
-能跑、符合直觉（最近改的排在前面）的默认序，不在没有消费方的情况下预先猜全
-部排序选项。
+这四个参数/函数是在实现 `features/library_browse`（第一个要消费本模块读
+接口的 feature）时加的,不是预先设计好等着被用。具体分工：
+
+- `sort_by`/`sort_dir`：本模块只维护一个**内部**的列名→SQLAlchemy 列对象
+  映射（`_SORT_COLUMNS`，目前是 `created_at`/`updated_at`/`year`/`title`
+  四个），不认识的名字直接 `ValueError`——这是技术层面"不能把任意字符串
+  拼进 SQL"的安全网，不是产品层面的排序选项白名单。真正决定"页面上暴露
+  哪些排序选项、叫什么名字"（比如要不要加"第一作者"）仍然是
+  `features/library_browse` 的职责；本模块故意不导出这个映射表,
+  这样它改动的时候不用碰这一层。
+- `work_ids`：按标签/文件夹筛选时，`features/library_browse` 先从
+  `domain.tags.list_work_ids_for_tag` / `domain.folders.list_work_ids_in_folder`
+  拿到一组裸 id（它们本来就不认识 `domain.works`），再传进来在
+  `library_id`/`include_deleted` 之外加一条 `IN (...)` 过滤——这样"按标签筛选
+  + 分页 + 排序"始终是一次 SQL 查询，不需要先查全量再在 Python 里做交集
+  （后者会让"全选所有筛选结果"退化成 O(n) 次查询，正是「两处已定」第 2 条
+  明确要避免的）。传空列表（区别于不传/`None`）是"筛选交出零候选"的正常
+  情形，查出空结果而不是报错或退化成"不筛选"。
+- `list_work_ids`：裸 id 版的 `list_works`,命名和用意对齐
+  `domain.folders.list_work_ids_in_folder`/`domain.tags.list_work_ids_for_tag`
+  ——`resolve_selection()`（"全选所有筛选结果"展开成显式 id 列表）只要 id,
+  不需要为几万条文献把整行数据搬进内存。
+- `count_works`：配 `list_works` 同一套过滤条件的计数,给分页算总页数用。
+
+本模块先给一个能跑、符合直觉（最近改的排在前面）的默认序
+（`updated_at desc`），不在没有消费方的情况下预先猜全部排序选项——"第一作者"
+排序目前仍然缺一个可供排序的列（`authors_json` 是 JSON，直接按它排序要么
+绑定 SQLite 的 `json_extract` 方言、要么另加一个常驻同步的派生列,两者都还
+没有足够的消费方证明值得做,留在刻意裁剪范围里）。
 
 ### `updated_at` 靠列级 `onupdate`，不是在每个改字段的函数里手动赋值
 
@@ -157,6 +182,6 @@ features**——跨 domain 的 `library_id` 引用是裸 `int`，约定详见
 | 自动合并两条被判定为重复的记录 | `dedupe_review`——合并要决定保留哪条的哪些字段、怎么迁移关联的 tags/folders/notes/attachments，比这里的"记一条候选"复杂得多 |
 | 编辑后自动重新扫描疑似重复 | 调用方显式决定（见上文设计要点） |
 | `purge_work` 级联到 tags/folders/notes/attachments | `features/organizing` 编排跨 domain 顺序 |
-| 更丰富的排序/筛选（年份范围、第一作者、按 item_type 筛） | `features/library_browse` |
+| 按第一作者排序、年份范围/`item_type` 筛选 | `features/library_browse`；前者缺一个可排序的派生列，后两者目前没有消费方 |
 | `work_relations` 的 `relation_type` 词表校验 | v1 不限定具体取值（比如 "preprint_of"/"duplicate_of"/"confirmed_not_duplicate"），由调用方的业务知识决定用什么词；放这里要穷举会预先猜错 |
 | 标识符 `value_norm` 的更严格校验（真的验证 DOI 字符集、ISBN 校验位） | v1 只做大小写折叠 + 常见前缀剥离，不做格式级校验 |

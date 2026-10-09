@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from caps.bibformats import ITEM_TYPES, Person
@@ -390,27 +390,119 @@ def update_work(
     return _work_dto(row)
 
 
+_SORT_COLUMNS = {
+    "created_at": Work.created_at,
+    "updated_at": Work.updated_at,
+    "year": Work.year,
+    "title": Work.title,
+}
+
+
+def _filtered_works_stmt(
+    *,
+    library_id: int,
+    include_deleted: bool,
+    deleted_only: bool = False,
+    work_ids: Sequence[int] | None,
+):
+    stmt = select(Work).where(Work.library_id == library_id)
+    if deleted_only:
+        # 回收站视图：只看已删的，和 include_deleted（"也看已删的"）是两件不同
+        # 的事,互不兼容时 deleted_only 优先——传了它说明调用方明确要回收站,
+        # 不该再被 include_deleted 的默认值悄悄影响。
+        stmt = stmt.where(Work.deleted_at.is_not(None))
+    elif not include_deleted:
+        stmt = stmt.where(Work.deleted_at.is_(None))
+    if work_ids is not None:
+        stmt = stmt.where(Work.id.in_(work_ids))
+    return stmt
+
+
 def list_works(
     db: Session,
     *,
     library_id: int,
     include_deleted: bool = False,
+    deleted_only: bool = False,
+    work_ids: Sequence[int] | None = None,
+    sort_by: str = "updated_at",
+    sort_dir: str = "desc",
     limit: int | None = None,
     offset: int | None = None,
 ) -> list[WorkDTO]:
-    """v1 固定按 `updated_at desc` 排序（见页面梳理⑨「排序控制」）。更丰富的
-    排序键白名单（年份/标题/第一作者）是 `features/library_browse` 要加的
-    下一层，不在本模块——这里先给一个能跑的默认序，不预先猜全部排序选项。
+    """默认按 `updated_at desc` 排序（见页面梳理⑨「排序控制」）。`sort_by`/
+    `sort_dir` 是本模块能安全执行的最小参数化——真正面向用户的排序键白名单
+    （年份/标题/第一作者……这几个名字要不要就叫这样）是 `features/library_browse`
+    的职责，不在本模块；本模块只保证"不认识的 `sort_by` 直接拒绝"，不负责
+    替上层设计产品词汇。
+
+    `deleted_only`——回收站视图用：只要已删的，和 `include_deleted`（"也看
+    已删的"，即不筛掉）是两件不同的事；两者都传时 `deleted_only` 优先。
+    之所以不是把 `include_deleted` 改成三态枚举，是因为那会改掉一个已有
+    两个调用点的函数签名；加一个新的、默认 `False` 的参数不影响任何既有
+    调用。
+
+    `work_ids`——传了就在 `library_id`/`include_deleted` 之外再加一条
+    `Work.id IN (...)` 过滤：这是 `features/library_browse` 把"按标签/文件夹
+    筛选"编译成一个单次查询用的口子（先从 `domain.tags`/`domain.folders` 拿到
+    一组裸 `work_id`，再传进来），不是本模块认识标签或文件夹。传空列表
+    `[]`（不是 `None`）会查出一个空结果——这是"筛选条件交出一个空候选集"
+    的正常情形，不是错误。
+
+    Raises:
+        ValueError: `sort_by` 不在已知列里，或 `sort_dir` 不是 asc/desc。
     """
-    stmt = select(Work).where(Work.library_id == library_id)
-    if not include_deleted:
-        stmt = stmt.where(Work.deleted_at.is_(None))
-    stmt = stmt.order_by(Work.updated_at.desc())
+    column = _SORT_COLUMNS.get(sort_by)
+    if column is None:
+        raise ValueError(f"不认识的 sort_by：{sort_by!r}")
+    if sort_dir not in ("asc", "desc"):
+        raise ValueError(f"sort_dir 必须是 asc 或 desc：{sort_dir!r}")
+
+    stmt = _filtered_works_stmt(
+        library_id=library_id, include_deleted=include_deleted, deleted_only=deleted_only, work_ids=work_ids
+    )
+    stmt = stmt.order_by(column.desc() if sort_dir == "desc" else column.asc())
     if offset is not None:
         stmt = stmt.offset(offset)
     if limit is not None:
         stmt = stmt.limit(limit)
     return [_work_dto(row) for row in db.scalars(stmt)]
+
+
+def list_work_ids(
+    db: Session,
+    *,
+    library_id: int,
+    include_deleted: bool = False,
+    deleted_only: bool = False,
+    work_ids: Sequence[int] | None = None,
+) -> list[int]:
+    """只返回裸 `id`，不组装 `WorkDTO`——同 `domain.folders.list_work_ids_in_folder`
+    / `domain.tags.list_work_ids_for_tag` 的命名和用意：`features/library_browse`
+    的 `resolve_selection()`（"全选所有筛选结果"展开成显式 id 列表,见「两处
+    已定」第 2 条）只要 id,不需要为此把整条文献记录都搬进内存。不排序——
+    调用方只拿它去做集合运算（交集/传给别的函数当过滤条件),顺序没有意义。
+    """
+    stmt = _filtered_works_stmt(
+        library_id=library_id, include_deleted=include_deleted, deleted_only=deleted_only, work_ids=work_ids
+    )
+    return list(db.scalars(stmt.with_only_columns(Work.id)))
+
+
+def count_works(
+    db: Session,
+    *,
+    library_id: int,
+    include_deleted: bool = False,
+    deleted_only: bool = False,
+    work_ids: Sequence[int] | None = None,
+) -> int:
+    """配 `list_works` 同一套过滤条件的计数,给分页算总页数/"筛选总数"用,
+    不需要先把一整页数据取出来再 `len()`。"""
+    stmt = _filtered_works_stmt(
+        library_id=library_id, include_deleted=include_deleted, deleted_only=deleted_only, work_ids=work_ids
+    )
+    return db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
 
 def soft_delete_work(db: Session, work_id: int) -> None:
