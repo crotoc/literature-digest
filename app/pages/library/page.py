@@ -15,9 +15,13 @@ list_library_page()——按 view(all/trash) + 排序 + 分页浏览卡片列表
 没做是因为要等 features/uploading 落地的附件才有意义，现在附件已经有了。
 格式化引用串的样式现在接的是 `features.exporting.resolve_citation_style`
 （账号→站点→代码默认三级回退，账号级在 app/pages/settings 改），不再
-固定写死 APA。LaTeX cite 命令/citation key 复制是多选批量场景（`cite_keys`/`cite_latex`
-天生接收一组 work_ids），和这页目前全是单篇操作的调法不是一回事，留给
-批量/选择集机制落地之后。单篇加入/移出文件夹接的也是 features/organizing
+固定写死 APA。LaTeX cite 命令/citation key 复制是多选批量场景
+（`cite_keys`/`cite_latex` 天生接收一组 work_ids），接的是独立的
+`/l/{slug_and_id}/cite-selection` 路由（不是 `cite_work_route` 那条单篇
+路由加分支）——选区机制复用 `batch_action_route`/`export_selection_route`
+同一套 `selection_mode`，但两种模式都要经过 `resolve_selection` 而不能
+让 explicit 模式直接传 work_ids，理由见该路由自己的 docstring。单篇
+加入/移出文件夹接的也是 features/organizing
 的单项操作（`bulk_add_to_folder`/`bulk_remove_from_folder`，work_ids=[单个
 id]）——它们内部已经用 `_check_work_scope` 校验了 work_id 真的属于传入的
 library_id（和 bulk_remove_tag 同一个安全模型），所以这两条路由不需要像
@@ -53,9 +57,9 @@ failed outcome、不中断其余项、不抛到页面层，和 `features/dedupe_
 `ValueError`（这两个值只有一份，不逐项校验），页面层接住转成提示。
 批量彻底删除（`purge`）额外要求勾选 `confirm_purge`——这个操作不可
 撤销，批量放大了误点的影响面，比单篇删除多一道确认合理。批量导出
-（只导出选中项而不是整库）、`cite_keys`/`cite_latex` 批量引用复制仍然
-留给下一个增量——这两个不需要"全选所有筛选结果"落地才能做，纯粹是
-还没轮到。
+（`export_selection_route`，只导出选中项而不是整库）、`cite_keys`/
+`cite_latex` 批量引用复制（`cite_selection_route`）都已经接上，两条都
+复用这同一套 `selection_mode` 机制。
 
 附件接 features/uploading 的单文件上传/整目录批量上传/下载/删除四个
 操作，`BlobStore` 实例由 app/shell/deps.py 的 `blob_store()` 依赖注入
@@ -88,7 +92,7 @@ from __future__ import annotations
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 
 from app.shell.deps import blob_store, current_account, db
 from app.shell.registry import NavItem
@@ -104,6 +108,8 @@ from domain.works import WorkNotFound, get_work, list_work_ids
 from features.annotating import set_work_note, update_metadata
 from features.exporting import (
     cite_formatted,
+    cite_keys,
+    cite_latex,
     cite_record_text,
     export_bibliography,
     export_with_attachments_zip,
@@ -584,6 +590,81 @@ def export_library_route(
     )
 
 
+@router.post("/l/{slug_and_id}/export-selection")
+def export_selection_route(
+    slug_and_id: str,
+    format: str = Form("ris"),
+    with_attachments: bool = Form(False),
+    work_ids: list[int] = Form([]),
+    selection_mode: str = Form("explicit"),
+    tag_ids: list[int] = Form([]),
+    folder_id: str = Form(""),
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+    store=Depends(blob_store),
+):
+    """导出"当前选区"，和 `/export`（整库导出）是两条独立路由，不是同一条
+    路由加分支——整库导出的"不分页、不走选择集"是它自己 docstring 里
+    明确的 v1 裁剪，这条新路由不改它的行为，只是补上当时留白的那部分。
+
+    选区复用批量操作路由（`batch_action_route`）同一套 `selection_mode`
+    机制：`"explicit"`（默认）直接用页面上勾中的 `work_ids`；
+    `"all_filtered"` 当场用 `resolve_selection` 把 `tag_ids`/`folder_id`/
+    `view` 筛选条件展开成 id 列表。explicit 模式下混进别的库的 work_id
+    不需要单独挡——`domain.works.list_works`（`export_bibliography`/
+    `export_with_attachments_zip` 内部都走它）本身就是按 `library_id`
+    过滤的查询构造器，不属于这个库的 id 会被静默滤掉，不是信任客户端
+    传来的 id 没被篡改。
+    """
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+
+    if format not in SUPPORTED_FORMATS:
+        raise HTTPException(status_code=400, detail=f"不支持的导出格式：{format!r}")
+
+    if selection_mode == "all_filtered":
+        folder_id_value = int(folder_id) if folder_id.strip().isdigit() else None
+        try:
+            work_ids = resolve_selection(
+                session, library_id=library_id, mode="all_filtered",
+                view=view, tag_ids=tag_ids, folder_id=folder_id_value,
+            )
+        except (ValueError, TagNotFound, FolderNotFound) as error_detail:
+            return _back_to_list_with_error(
+                slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error=str(error_detail)
+            )
+    elif selection_mode != "explicit":
+        raise HTTPException(status_code=400, detail=f"不认识的 selection_mode：{selection_mode!r}")
+
+    if not work_ids:
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error="没有选中任何文献"
+        )
+
+    if with_attachments:
+        zip_body = export_with_attachments_zip(
+            session, library_id=library_id, work_ids=work_ids, format=format, blob_store=store
+        )
+        return Response(
+            content=zip_body,
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="selection.zip"'},
+        )
+
+    body = export_bibliography(session, library_id=library_id, work_ids=work_ids, format=format)
+    ext = _EXPORT_EXTENSIONS[format]
+    return Response(
+        content=body,
+        media_type=_EXPORT_CONTENT_TYPES[format],
+        headers={"Content-Disposition": f'attachment; filename="selection.{ext}"'},
+    )
+
+
 @router.get("/l/{slug_and_id}/works/{work_id}/cite")
 def cite_work_route(
     slug_and_id: str,
@@ -608,6 +689,72 @@ def cite_work_route(
         media_type=_EXPORT_CONTENT_TYPES[format],
         headers={"Content-Disposition": f'attachment; filename="work-{work_id}.{ext}"'},
     )
+
+
+@router.post("/l/{slug_and_id}/cite-selection")
+def cite_selection_route(
+    slug_and_id: str,
+    cite_format: str = Form("keys"),
+    latex_command: str = Form("cite"),
+    work_ids: list[int] = Form([]),
+    selection_mode: str = Form("explicit"),
+    tag_ids: list[int] = Form([]),
+    folder_id: str = Form(""),
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    """批量引用复制（citation key / LaTeX `\\cite{}`）——计划「② 引用」里
+    点名这是多选批量场景（`cite_keys`/`cite_latex` 天生接收一组
+    work_ids），和这页其余单篇操作（`cite_work_route` 一次只认一个
+    work_id）不是同一回事，现在"全选所有筛选结果"落地了，轮到它。
+
+    和 `export_selection_route`/`batch_action_route` 不一样的地方：这里
+    **两种** `selection_mode` 都要经过 `resolve_selection`，不能让
+    explicit 模式把 `work_ids` 原样传给 `features.exporting.cite_keys`/
+    `cite_latex`——那两个函数内部只是逐个 `get_work(db, work_id)`，不核对
+    work_id 是否属于传入的库（和 annotating/uploading 那几个已经在别处
+    修过的"裸 work_id 没有 ownership 检查"是同一类问题），而
+    `export_bibliography`/`export_with_attachments_zip` 走的
+    `domain.works.list_works` 本身是按 `library_id` 过滤的查询构造器，
+    不需要这道额外过滤——两条路由的处理不一样是因为底下接的函数本身
+    安全模型不一样，不是疏忽。`resolve_selection(mode="explicit", ...)`
+    内部调 `list_work_ids` 按库过滤，不属于的 id 静默丢弃。
+    """
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+
+    if cite_format not in {"keys", "latex"}:
+        raise HTTPException(status_code=400, detail=f"不认识的引用格式：{cite_format!r}")
+    if selection_mode not in {"explicit", "all_filtered"}:
+        raise HTTPException(status_code=400, detail=f"不认识的 selection_mode：{selection_mode!r}")
+
+    folder_id_value = int(folder_id) if folder_id.strip().isdigit() else None
+    try:
+        resolved_ids = resolve_selection(
+            session, library_id=library_id, mode=selection_mode, work_ids=work_ids,
+            view=view, tag_ids=tag_ids, folder_id=folder_id_value,
+        )
+    except (ValueError, TagNotFound, FolderNotFound) as error_detail:
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error=str(error_detail)
+        )
+
+    if not resolved_ids:
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error="没有选中任何文献"
+        )
+
+    if cite_format == "latex":
+        body = cite_latex(session, work_ids=resolved_ids, command=latex_command)
+    else:
+        keys = cite_keys(session, work_ids=resolved_ids)
+        body = "\n".join(keys[work_id] for work_id in resolved_ids if work_id in keys)
+    return PlainTextResponse(body)
 
 
 @router.post("/l/{slug_and_id}/works/{work_id}/attachments/upload")

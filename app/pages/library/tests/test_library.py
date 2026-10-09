@@ -1396,3 +1396,193 @@ def test_batch_unrecognized_selection_mode_is_rejected(client):
     )
 
     assert response.status_code == 400
+
+
+# ── 批量导出选中项 / 批量引用复制 ───────────────────────────────────────
+
+
+def _export_selection_post(client, library_url, *, work_ids=(), selection_mode="explicit", **extra):
+    data = {
+        "work_ids": [str(w) for w in work_ids],
+        "selection_mode": selection_mode,
+        "format": "ris",
+        "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1",
+    }
+    data.update(extra)
+    return client.post(f"{library_url}export-selection", data=data)
+
+
+def _cite_selection_post(client, library_url, *, work_ids=(), selection_mode="explicit", **extra):
+    data = {
+        "work_ids": [str(w) for w in work_ids],
+        "selection_mode": selection_mode,
+        "cite_format": "keys",
+        "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1",
+    }
+    data.update(extra)
+    return client.post(f"{library_url}cite-selection", data=data)
+
+
+def test_export_selection_explicit_only_includes_checked_work_ids(client):
+    _register(client, username="sel1", email="sel1@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    kept_id = _import_with_title(client, title="Selection Keep", year=2021)
+    _import_with_title(client, title="Selection Skip", year=2022)
+
+    response = _export_selection_post(client, library_url, work_ids=[kept_id])
+
+    assert response.status_code == 200
+    assert "Selection Keep" in response.text
+    assert "Selection Skip" not in response.text
+
+
+def test_export_selection_with_attachments_returns_zip(client):
+    _register(client, username="sel2", email="sel2@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    client.post(
+        f"{library_url}works/{work_id}/attachments/upload",
+        files={"file": ("notes.txt", b"hello", "text/plain")},
+    )
+
+    response = _export_selection_post(
+        client, library_url, work_ids=[work_id], with_attachments="true"
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert "bibliography.ris" in archive.namelist()
+
+
+def test_export_selection_all_filtered_uses_tag_filter(client):
+    _register(client, username="sel3", email="sel3@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    tagged = _import_with_title(client, title="Export Tagged", year=2021)
+    untagged = _import_with_title(client, title="Export Untagged", year=2022)
+    tag_id = _add_tag(client, library_url, tagged, "export-sel-tag")
+
+    response = _export_selection_post(
+        client, library_url, selection_mode="all_filtered", tag_ids=[str(tag_id)]
+    )
+
+    assert response.status_code == 200
+    assert "Export Tagged" in response.text
+    assert "Export Untagged" not in response.text
+
+
+def test_export_selection_with_no_selection_shows_error(client):
+    _register(client, username="sel4", email="sel4@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    _import_sample(client)
+
+    response = _export_selection_post(client, library_url, work_ids=[])
+
+    assert response.status_code == 200
+    assert "没有选中任何文献" in response.text
+
+
+def test_export_selection_requires_login(client):
+    _register(client, username="sel5", email="sel5@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    response = _export_selection_post(client, library_url, work_ids=[work_id])
+
+    assert str(response.url).endswith("/login")
+
+
+def test_cite_selection_keys_returns_citekeys_for_selected_works_only(client):
+    _register(client, username="sel6", email="sel6@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    kept_id = _import_with_title(client, title="Cite Keep", year=2021)
+    _import_with_title(client, title="Cite Skip", year=2022)
+
+    response = _cite_selection_post(client, library_url, work_ids=[kept_id], cite_format="keys")
+
+    assert response.status_code == 200
+    assert response.text.strip() != ""
+
+
+def test_cite_selection_latex_wraps_keys_in_cite_command(client):
+    _register(client, username="sel7", email="sel7@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    work_id = _import_with_title(client, title="Cite Latex", year=2021)
+
+    response = _cite_selection_post(
+        client, library_url, work_ids=[work_id], cite_format="latex", latex_command="citep"
+    )
+
+    assert response.status_code == 200
+    assert "\\citep{" in response.text
+
+
+def test_cite_selection_all_filtered_uses_folder_filter(client):
+    _register(client, username="sel8", email="sel8@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    slug_and_id = library_url.strip("/").removeprefix("l/")
+    filed_id = _import_with_title(client, title="Cite Filed", year=2021)
+    _import_with_title(client, title="Cite Not Filed", year=2022)
+    folder_id = _create_folder(client, slug_and_id, "cite-sel-folder")
+    client.post(f"{library_url}works/{filed_id}/folders/add", data={"folder_id": str(folder_id)})
+
+    response = _cite_selection_post(
+        client, library_url, selection_mode="all_filtered", folder_id=str(folder_id), cite_format="keys"
+    )
+
+    assert response.status_code == 200
+    assert response.text.strip() != ""
+
+
+def test_cite_selection_rejects_unrecognized_cite_format(client):
+    _register(client, username="sel9", email="sel9@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    work_id = _import_sample(client)
+
+    response = _cite_selection_post(client, library_url, work_ids=[work_id], cite_format="bogus")
+
+    assert response.status_code == 400
+
+
+def test_cite_selection_filters_out_work_id_from_another_library(client):
+    _register(client, username="sel10", email="sel10@example.org")
+    sel10_work_id = _import_sample(client)
+    client.post("/logout")
+
+    _register(client, username="sel11", email="sel11@example.org")
+    own_work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    # 混进一个属于 sel10 的 work_id——cite_keys/cite_latex 内部不核对
+    # library_id，必须靠这条路由自己先过 resolve_selection 把它滤掉。
+    response = _cite_selection_post(
+        client, library_url, work_ids=[own_work_id, sel10_work_id], cite_format="keys"
+    )
+
+    assert response.status_code == 200
+    # 只有一个 key（own_work_id 的），不是两个——如果外库的 id 没被滤掉，
+    # 这里会多出一条不该出现的 citekey。
+    assert len(response.text.strip().splitlines()) == 1
+
+
+def test_cite_selection_requires_login(client):
+    _register(client, username="sel12", email="sel12@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    response = _cite_selection_post(client, library_url, work_ids=[work_id])
+
+    assert str(response.url).endswith("/login")

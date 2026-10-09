@@ -119,6 +119,19 @@
       {% else %}
         <button type="submit" name="action" value="delete" class="btn">批量移入回收站</button>
       {% endif %}
+      <select name="format">
+        <option value="ris">RIS</option>
+        <option value="bibtex">BibTeX</option>
+        <option value="csljson">CSL-JSON</option>
+      </select>
+      <label class="export-with-attachments">
+        <input type="checkbox" name="with_attachments" value="true"> 含附件
+      </label>
+      <button type="submit" formaction="/l/{{ slug_and_id }}/export-selection" class="btn">导出选中/筛选结果</button>
+      <button type="submit" name="cite_format" value="keys"
+              formaction="/l/{{ slug_and_id }}/cite-selection" class="btn">复制 Citation Key</button>
+      <button type="submit" name="cite_format" value="latex"
+              formaction="/l/{{ slug_and_id }}/cite-selection" class="btn">复制 LaTeX \cite{}</button>
     </form>
   {% endif %}
 
