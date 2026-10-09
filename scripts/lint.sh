@@ -65,6 +65,16 @@ if [ -n "$hits" ]; then report 6 '除 infra/db.py 外禁止 create_engine(/sessi
 else ok 6 '唯一 engine/session 工厂'; fi
 
 # 7. 可插拔性：删掉任一 adapter 或任一 feature，其余 pytest 仍须全绿
+#
+# 默认只做 `pytest --collect-only`（只导入+收集，不执行测试体）而不是全量
+# 执行：规则要抓的"隐式依赖"几乎总是导入时就炸（`from adapters.sources.x
+# import y` 这类静态 import），--collect-only 原样触发同一个 ModuleNotFoundError
+# /ImportError，已经实测验证（人为挪走一个 adapter、留着一处它的直接 import
+# 不动，--collect-only 和全量执行报的是同一个失败、同一个 exit code）。
+# 代价：真正的"运行时才触发"的隐式依赖（比如只在某个测试函数体/fixture 函数
+# 体内部才执行的局部 import）collect-only 测不出来——这种写法目前整个仓库
+# 里没有出现过（约定是模块顶层 import），一旦真的需要更强的保证，设
+# `FULL_RULE7=1` 跑回全量执行（慢，但语义上更严格）。
 if [ "${SKIP_RULE7:-0}" = "1" ]; then
   printf '\033[33mskip\033[0m rule 7: 可插拔性（SKIP_RULE7=1）\n'
 else
@@ -74,6 +84,13 @@ else
   else
     PY=./.venv/bin/python
     [ -x "$PY" ] || PY=python3
+    if [ "${FULL_RULE7:-0}" = "1" ]; then
+      pytest_opts="-q -p no:cacheprovider"
+      rule7_mode='全量执行（FULL_RULE7=1）'
+    else
+      pytest_opts="-q -p no:cacheprovider --collect-only"
+      rule7_mode='仅收集（默认，更快；设 FULL_RULE7=1 可跑回全量执行）'
+    fi
     stash=$(mktemp -d)
     for t in $targets; do
       base=$(basename "$t")
@@ -114,7 +131,7 @@ else
         mv "$dep" "$dep_stash"
         moved_dependents="$moved_dependents $dep:$dep_stash"
       done
-      if ! "$PY" -m pytest -q -p no:cacheprovider >/dev/null 2>&1; then
+      if ! "$PY" -m pytest $pytest_opts >/dev/null 2>&1; then
         report 7 "删掉 $t 后 pytest 不绿（存在隐式依赖）" "$t"
       fi
       rm -rf "$t"
@@ -127,7 +144,7 @@ else
       done
     done
     rmdir "$stash" 2>/dev/null || true
-    [ "$fail" = "0" ] && ok 7 '任一 adapter/feature 可删'
+    [ "$fail" = "0" ] && ok 7 "任一 adapter/feature 可删（$rule7_mode）"
   fi
 fi
 
