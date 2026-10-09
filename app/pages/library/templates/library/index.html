@@ -120,10 +120,24 @@
           <ul class="attachment-list">
             {% for attachment in card.attachments %}
               <li class="attachment-row">
+                {% if attachment.role == "main" %}
+                  <span class="tag-chip" title="主附件">主</span>
+                {% endif %}
                 <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/{{ attachment.id }}/download">
                   {{ attachment.filename }}
                 </a>
+                {% if attachment.content_type in viewable_content_types %}
+                  <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/{{ attachment.id }}/view"
+                     target="_blank">在线查看</a>
+                {% endif %}
                 <span class="muted">（{{ (attachment.size / 1024) | round(1) }} KB）</span>
+                {% if attachment.role != "main" %}
+                  <form method="post" class="attachment-set-main-form"
+                        action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/{{ attachment.id }}/set-main">
+                    {{ hidden_state() }}
+                    <button type="submit">设为主</button>
+                  </form>
+                {% endif %}
                 <form method="post" class="attachment-delete-form"
                       action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/{{ attachment.id }}/delete">
                   {{ hidden_state() }}

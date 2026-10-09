@@ -692,3 +692,132 @@ def test_delete_attachment_rejects_attachment_id_from_another_library(client):
         f"{amara_library_url}works/{amara_work_id}/attachments/{attachment_id}/delete"
     )
     assert response.status_code == 404
+
+
+# ── 设为 Main PDF / 在线查看 ─────────────────────────────────────────────
+
+
+def test_upload_defaults_to_other_role_then_set_main_promotes_and_demotes(client):
+    _register(client, username="bianca5", email="bianca5@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    first = client.post(
+        f"{library_url}works/{work_id}/attachments/upload",
+        files={"file": ("first.txt", b"first", "text/plain")},
+    )
+    first_id = int(re.search(r"attachments/(\d+)/download\">\s*first\.txt", first.text).group(1))
+    # 默认 role 是 "other"，列表里不该出现"主"标记，应该有"设为主"按钮。
+    assert "设为主" in first.text
+
+    second = client.post(
+        f"{library_url}works/{work_id}/attachments/upload",
+        files={"file": ("second.txt", b"second", "text/plain")},
+    )
+    second_id = int(re.search(r"attachments/(\d+)/download\">\s*second\.txt", second.text).group(1))
+
+    set_main_response = client.post(f"{library_url}works/{work_id}/attachments/{second_id}/set-main")
+    assert set_main_response.status_code == 200
+    # second 升级成 main 之后不再有"设为主"按钮；first 仍然是 other、按钮还在。
+    second_row = re.search(rf"attachments/{second_id}/download.*?</li>", set_main_response.text, re.S)
+    first_row = re.search(rf"attachments/{first_id}/download.*?</li>", set_main_response.text, re.S)
+    assert "设为主" not in second_row.group(0)
+    assert "设为主" in first_row.group(0)
+
+
+def test_set_main_attachment_requires_login(client):
+    _register(client, username="carlos5", email="carlos5@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    upload_response = client.post(
+        f"{library_url}works/{work_id}/attachments/upload",
+        files={"file": ("a.txt", b"a", "text/plain")},
+    )
+    attachment_id = int(re.search(r"attachments/(\d+)/download", upload_response.text).group(1))
+    client.post("/logout")
+
+    response = client.post(f"{library_url}works/{work_id}/attachments/{attachment_id}/set-main")
+    assert str(response.url).endswith("/login")
+
+
+def test_set_main_attachment_rejects_attachment_id_from_another_library(client):
+    _register(client, username="dahlia5", email="dahlia5@example.org")
+    dahlia_work_id = _import_sample(client)
+    dahlia_lib_response = client.get("/library")
+    dahlia_library_url = str(dahlia_lib_response.url).replace("http://testserver", "")
+    upload_response = client.post(
+        f"{dahlia_library_url}works/{dahlia_work_id}/attachments/upload",
+        files={"file": ("dahlia.txt", b"dahlia secret", "text/plain")},
+    )
+    attachment_id = int(re.search(r"attachments/(\d+)/download", upload_response.text).group(1))
+    client.post("/logout")
+
+    _register(client, username="emmett5", email="emmett5@example.org")
+    emmett_work_id = _import_sample(client)
+    emmett_lib_response = client.get("/library")
+    emmett_library_url = str(emmett_lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{emmett_library_url}works/{emmett_work_id}/attachments/{attachment_id}/set-main"
+    )
+    assert response.status_code == 404
+
+
+def test_view_attachment_renders_pdf_inline(client):
+    _register(client, username="felix5", email="felix5@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    pdf_bytes = b"%PDF-1.4 fake pdf content for test"
+    upload_response = client.post(
+        f"{library_url}works/{work_id}/attachments/upload",
+        files={"file": ("paper.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert "在线查看" in upload_response.text
+    attachment_id = int(re.search(r"attachments/(\d+)/download", upload_response.text).group(1))
+
+    view_response = client.get(f"{library_url}works/{work_id}/attachments/{attachment_id}/view")
+    assert view_response.status_code == 200
+    assert view_response.content == pdf_bytes
+    assert "inline" in view_response.headers["content-disposition"]
+
+
+def test_view_attachment_rejects_non_viewable_content_type(client):
+    _register(client, username="grace5", email="grace5@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    upload_response = client.post(
+        f"{library_url}works/{work_id}/attachments/upload",
+        files={"file": ("notes.txt", b"plain text", "text/plain")},
+    )
+    assert "在线查看" not in upload_response.text
+    attachment_id = int(re.search(r"attachments/(\d+)/download", upload_response.text).group(1))
+
+    view_response = client.get(f"{library_url}works/{work_id}/attachments/{attachment_id}/view")
+    assert view_response.status_code == 415
+
+
+def test_view_attachment_rejects_attachment_id_from_another_library(client):
+    _register(client, username="harlow5", email="harlow5@example.org")
+    harlow_work_id = _import_sample(client)
+    harlow_lib_response = client.get("/library")
+    harlow_library_url = str(harlow_lib_response.url).replace("http://testserver", "")
+    upload_response = client.post(
+        f"{harlow_library_url}works/{harlow_work_id}/attachments/upload",
+        files={"file": ("harlow.pdf", b"%PDF-1.4 harlow secret", "application/pdf")},
+    )
+    attachment_id = int(re.search(r"attachments/(\d+)/download", upload_response.text).group(1))
+    client.post("/logout")
+
+    _register(client, username="iris5", email="iris5@example.org")
+    iris_work_id = _import_sample(client)
+    iris_lib_response = client.get("/library")
+    iris_library_url = str(iris_lib_response.url).replace("http://testserver", "")
+
+    response = client.get(f"{iris_library_url}works/{iris_work_id}/attachments/{attachment_id}/view")
+    assert response.status_code == 404

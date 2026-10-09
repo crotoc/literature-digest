@@ -27,9 +27,7 @@ library_id（和 bulk_remove_tag 同一个安全模型），所以这两条路�
 附件这次只接 features/uploading 的单文件上传/下载/删除三个单项操作，
 `BlobStore` 实例由 app/shell/deps.py 的 `blob_store()` 依赖注入（装配层
 在启动时组出 `BlobStore(LocalFsBackend(...))`，caps/blobstore 自己不认识
-adapters/storage，这条线必须在这一层接）。v1 范围裁剪：不做"设为 Main
-PDF"（`domain.attachments.set_main_attachment`，这次 role 固定用默认值）、
-不做内嵌 PDF 阅读器（features/pdf_reading，下一个增量）、不做
+adapters/storage，这条线必须在这一层接）。v1 范围裁剪：不做
 `webkitdirectory` 整目录批量上传（`upload_batch`，这次每次只传一个文件）、
 重名策略固定用默认的 `"rename"`（追加编号），不开 UI 让用户选
 ask/overwrite——那是"重名策略"这个独立决策，不该现在顺带定下来。
@@ -39,6 +37,13 @@ ask/overwrite——那是"重名策略"这个独立决策，不该现在顺带�
 两个连 `work_id` 都不查，直接拿 `attachment_id` 查改）——和
 `_require_work_in_library` 同一类问题，所以这里也在页面层补了
 `_require_attachment_in_library`。
+
+本增量补上"设为 Main PDF"（`domain.attachments.set_main_attachment`）和
+内嵌查看（`features.pdf_reading.open_for_view`，只对
+`VIEWABLE_CONTENT_TYPES` 白名单内的类型——目前只有 `application/pdf`——
+给一个浏览器原生渲染的查看链接，`Content-Disposition: inline`，不是
+下载）。`set_main_attachment` 同样只认 `attachment_id`、不核对
+`library_id`，复用已有的 `_require_attachment_in_library` 补上这道检查。
 
 URL 用 `/l/<name-slug>-<id>/`——只认尾部数字 id，slug 前缀纯装饰，不校验
 是否和库名匹配（库改名后旧链接依然能打开，不需要重定向）。
@@ -57,7 +62,7 @@ from app.shell.templating import templates
 from caps.bibformats import SUPPORTED_FORMATS
 from caps.slug import slugify
 from domain.accounts import AccountDTO
-from domain.attachments import AttachmentDTO, AttachmentNotFound, get_attachment
+from domain.attachments import AttachmentDTO, AttachmentNotFound, get_attachment, set_main_attachment
 from domain.folders import list_folders
 from domain.libraries import LibraryDTO, LibraryNotFound, list_libraries_for_account, resolve_scope
 from domain.works import WorkNotFound, get_work, list_work_ids
@@ -80,6 +85,7 @@ from features.organizing import (
     bulk_soft_delete,
     create_tag_and_apply,
 )
+from features.pdf_reading import VIEWABLE_CONTENT_TYPES, NotViewable, open_for_view
 from features.uploading import (
     FilenameConflict,
     UploadRejected,
@@ -241,6 +247,7 @@ def library_view(
             "page": page,
             "total_pages": total_pages,
             "error": error,
+            "viewable_content_types": VIEWABLE_CONTENT_TYPES,
         },
     )
 
@@ -598,3 +605,51 @@ def delete_attachment_route(
 
     remove_attachment(session, attachment_id, blob_store=store)
     return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+@router.post("/l/{slug_and_id}/works/{work_id}/attachments/{attachment_id}/set-main")
+def set_main_attachment_route(
+    slug_and_id: str,
+    work_id: int,
+    attachment_id: int,
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    _require_work_in_library(session, library_id, work_id)
+    _require_attachment_in_library(session, library_id, attachment_id)
+
+    set_main_attachment(session, attachment_id)
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+@router.get("/l/{slug_and_id}/works/{work_id}/attachments/{attachment_id}/view")
+def view_attachment_route(
+    slug_and_id: str,
+    work_id: int,
+    attachment_id: int,
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+    store=Depends(blob_store),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    _require_work_in_library(session, library_id, work_id)
+    attachment = _require_attachment_in_library(session, library_id, attachment_id)
+
+    try:
+        _, stream = open_for_view(session, attachment_id, blob_store=store)
+    except NotViewable:
+        raise HTTPException(status_code=415, detail="这个附件的类型不支持在线查看") from None
+    return StreamingResponse(
+        stream,
+        media_type=attachment.content_type or "application/octet-stream",
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(attachment.filename)}"},
+    )
