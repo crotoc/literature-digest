@@ -49,3 +49,17 @@ def session_scope() -> Iterator[Session]:
         raise
     finally:
         session.close()
+
+
+def new_memory_session() -> Session:
+    """给 domain 模块单测用：每次调用一个全新的、与 `ENGINE` 完全独立的内存
+    SQLite。不走 `.env` 的 `DATABASE_URL`，不会碰开发库，调用之间也互不可见。
+
+    这是 lint 规则 6 唯一的例外口子——规则本身禁止的是**业务代码**散落着造
+    engine（前两轮"两套互不相通的 DB"的根因），不是禁止测试用独立的内存库；
+    把这个口子开在本文件而不是各 `domain/<x>/tests/conftest.py` 里自己建，
+    是为了让这条例外仍然只有一处。
+    """
+    engine = create_engine("sqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)()
