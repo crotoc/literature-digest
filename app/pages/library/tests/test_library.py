@@ -988,6 +988,21 @@ def _batch_post(client, library_url, *, action, work_ids, **extra):
     return client.post(f"{library_url}batch", data=data)
 
 
+def _batch_post_all_filtered(client, library_url, *, action, view="all", tag_ids=(), folder_id="", **extra):
+    data = {
+        "action": action,
+        "selection_mode": "all_filtered",
+        "tag_ids": [str(t) for t in tag_ids],
+        "folder_id": str(folder_id),
+        "view": view,
+        "sort_by": "updated_at",
+        "sort_dir": "desc",
+        "page": "1",
+    }
+    data.update(extra)
+    return client.post(f"{library_url}batch", data=data)
+
+
 def test_batch_add_tag_then_remove_tag_applies_to_both_selected_works(client):
     _register(client, username="batch1", email="batch1@example.org")
     lib_response = client.get("/library")
@@ -1295,3 +1310,89 @@ def test_upload_batch_directory_rejects_work_id_from_another_library(client):
     )
 
     assert response.status_code == 404
+
+
+# ── 批量操作：全选所有筛选结果 ────────────────────────────────────────────
+
+
+def test_batch_all_filtered_with_tag_filter_applies_to_every_matching_work_not_just_checked_ones(client):
+    _register(client, username="allf1", email="allf1@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    tagged_a = _import_with_title(client, title="AllFiltered Tagged A", year=2021)
+    tagged_b = _import_with_title(client, title="AllFiltered Tagged B", year=2022)
+    untagged = _import_with_title(client, title="AllFiltered Untagged", year=2023)
+    tag_id = _add_tag(client, library_url, tagged_a, "allf-tag")
+    _add_tag(client, library_url, tagged_b, "allf-tag")
+
+    # 不传任何 work_ids（模拟"一个都没勾"，纯靠 all_filtered 展开）。
+    response = _batch_post_all_filtered(
+        client, library_url, action="delete", tag_ids=[tag_id],
+    )
+
+    assert response.status_code == 200
+    trash_response = client.get(library_url, params={"view": "trash"})
+    assert "AllFiltered Tagged A" in trash_response.text
+    assert "AllFiltered Tagged B" in trash_response.text
+    all_response = client.get(library_url, params={"view": "all"})
+    assert "AllFiltered Untagged" in all_response.text
+
+
+def test_batch_all_filtered_with_folder_filter_restores_every_matching_trashed_work(client):
+    _register(client, username="allf2", email="allf2@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    slug_and_id = library_url.strip("/").removeprefix("l/")
+    filed = _import_with_title(client, title="AllFiltered Filed", year=2021)
+    not_filed = _import_with_title(client, title="AllFiltered Not Filed", year=2022)
+    folder_id = _create_folder(client, slug_and_id, "allf-folder")
+    client.post(f"{library_url}works/{filed}/folders/add", data={"folder_id": str(folder_id)})
+    _batch_post(client, library_url, action="delete", work_ids=[filed, not_filed])
+
+    response = _batch_post_all_filtered(
+        client, library_url, action="restore", view="trash", folder_id=folder_id,
+    )
+
+    assert response.status_code == 200
+    all_response = client.get(library_url, params={"view": "all"})
+    assert "AllFiltered Filed" in all_response.text
+    assert "AllFiltered Not Filed" not in all_response.text
+    trash_response = client.get(library_url, params={"view": "trash"})
+    assert "AllFiltered Not Filed" in trash_response.text
+
+
+def test_batch_all_filtered_rejects_tag_id_from_another_library(client):
+    _register(client, username="allf3", email="allf3@example.org")
+    allf3_lib_response = client.get("/library")
+    allf3_library_url = str(allf3_lib_response.url).replace("http://testserver", "")
+    allf3_work_id = _import_with_title(client, title="AllFiltered3 Paper", year=2021)
+    other_tag_id = _add_tag(client, allf3_library_url, allf3_work_id, "allf3-tag")
+    client.post("/logout")
+
+    _register(client, username="allf4", email="allf4@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = _batch_post_all_filtered(
+        client, library_url, action="delete", tag_ids=[other_tag_id],
+    )
+
+    assert response.status_code == 200
+    assert "不属于这个库" in response.text
+
+
+def test_batch_unrecognized_selection_mode_is_rejected(client):
+    _register(client, username="allf5", email="allf5@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{library_url}batch",
+        data={
+            "action": "delete", "selection_mode": "bogus", "work_ids": [str(work_id)],
+            "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1",
+        },
+    )
+
+    assert response.status_code == 400

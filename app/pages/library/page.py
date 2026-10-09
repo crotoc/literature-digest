@@ -39,20 +39,23 @@ library_id（和 bulk_remove_tag 同一个安全模型），所以这两条路�
 
 批量操作（`/l/{slug_and_id}/batch`）接的是 `features.organizing` 的
 `bulk_add_tag`/`bulk_remove_tag`/`bulk_add_to_folder`/`bulk_remove_from_folder`/
-`bulk_soft_delete`/`bulk_restore`/`purge_works`——这次选区只认页面上
-**显式勾选**的 checkbox（`work_ids` 原样提交），不接「两处已定」第 2 条
-"全选所有筛选结果"（`resolve_selection` 的 `mode="all_filtered"`，那个
-还要把 tag_ids/folder_id 筛选条件也带进请求，留给下一个增量）。
-`work_ids` 列表里混进不属于这个库的 id 不需要在页面层单独挡——
-`_run_batch` 对每一项单独走 `_check_work_scope`，校验失败只记一条
+`bulk_soft_delete`/`bulk_restore`/`purge_works`，选区支持两种
+（「两处已定」第 2 条）：页面上**显式勾选**的 checkbox（`work_ids` 原样
+提交，`selection_mode="explicit"`，默认），和"全选所有筛选结果"
+（`selection_mode="all_filtered"`，当场用 `resolve_selection` 把
+`tag_ids`/`folder_id`/`view` 筛选条件展开成 id 列表，同一个请求内完成，
+id 不过浏览器）——详见 `batch_action_route` 自己的 docstring。
+`work_ids`（explicit 模式下）混进不属于这个库的 id 不需要在页面层单独
+挡——`_run_batch` 对每一项单独走 `_check_work_scope`，校验失败只记一条
 failed outcome、不中断其余项、不抛到页面层，和 `features/dedupe_review`
 那次一样是"feature 自己已经做对了,页面层不需要再包一层"；但
 `target_tag_id`/`target_folder_id` 本身不属于这个库时是顶层直接抛
 `ValueError`（这两个值只有一份，不逐项校验），页面层接住转成提示。
 批量彻底删除（`purge`）额外要求勾选 `confirm_purge`——这个操作不可
 撤销，批量放大了误点的影响面，比单篇删除多一道确认合理。批量导出
-（只导出选中项而不是整库）、`cite_keys`/`cite_latex` 批量引用复制，
-仍然和"全选所有筛选结果"一起留给下一个增量。
+（只导出选中项而不是整库）、`cite_keys`/`cite_latex` 批量引用复制仍然
+留给下一个增量——这两个不需要"全选所有筛选结果"落地才能做，纯粹是
+还没轮到。
 
 附件接 features/uploading 的单文件上传/整目录批量上传/下载/删除四个
 操作，`BlobStore` 实例由 app/shell/deps.py 的 `blob_store()` 依赖注入
@@ -114,6 +117,7 @@ from features.library_browse import (
     SORT_KEYS,
     VIEWS,
     list_library_page,
+    resolve_selection,
 )
 from features.organizing import (
     bulk_add_tag,
@@ -801,6 +805,9 @@ def batch_action_route(
     slug_and_id: str,
     action: str = Form(...),
     work_ids: list[int] = Form([]),
+    selection_mode: str = Form("explicit"),
+    tag_ids: list[int] = Form([]),
+    folder_id: str = Form(""),
     target_tag_id: str = Form(""),
     target_folder_id: str = Form(""),
     confirm_purge: bool = Form(False),
@@ -812,19 +819,26 @@ def batch_action_route(
     session=Depends(db),
     store=Depends(blob_store),
 ):
-    """批量操作——这次只接"显式勾选"这一种选区（`work_ids` 是页面上被
-    勾中的 checkbox 原样提交回来的），不接"全选所有筛选结果"
-    （`features.library_browse.resolve_selection` 的 `mode="all_filtered"`）
-    ——那个还要把当前的 tag_ids/folder_id 筛选条件也带进这条路由,是下一个
-    增量的范围,「两处已定」第 2 条本来就把这两件事分开写。
+    """批量操作——两种选区（「两处已定」第 2 条）：
 
-    `work_ids` 里混进不属于这个库的 id 不需要在这一层单独挡——
-    `features.organizing` 每个 `bulk_*` 函数内部的 `_check_work_scope`
-    对每一项单独校验，校验失败只记一条 "failed" outcome、不中断其余项、
-    不抛到这一层，和 `features/dedupe_review` 那次一样,是"feature 自己已经
-    做对了,页面层不需要再包一层"的情况。只有 `target_tag_id`/`target_folder_id`
-    本身不属于这个库时才是顶层直接抛 `ValueError`（这两个值只有一份，不是
-    逐项校验），这一层需要接住。
+    - `selection_mode="explicit"`（默认）：`work_ids` 是页面上被勾中的
+      checkbox 原样提交回来的。混进不属于这个库的 id 不需要在这一层单独
+      挡——`features.organizing` 每个 `bulk_*` 函数内部的 `_check_work_scope`
+      对每一项单独校验，校验失败只记一条 "failed" outcome、不中断其余
+      项、不抛到这一层，和 `features/dedupe_review` 那次一样,是"feature
+      自己已经做对了,页面层不需要再包一层"的情况。
+    - `selection_mode="all_filtered"`：页面上"全选所有筛选结果"按钮把
+      `work_ids` 换成当前的 `tag_ids`/`folder_id`/`view` 筛选条件，这一层
+      调 `features.library_browse.resolve_selection` 在**同一个请求**里
+      用一次查询把筛选条件展开成显式 id 列表——之后走的是和 explicit
+      完全一样的代码路径，`bulk_*` 全程只认 id 列表，不需要认识筛选条件
+      （和侧栏筛选那次强调的"id 不过浏览器"是同一条设计：这里 id 确实
+      没经过浏览器，是在服务端当场展开的）。`resolve_selection` 展开出来
+      的 id 已经保证属于这个库，不会再混进别库的 id。
+
+    只有 `target_tag_id`/`target_folder_id` 本身不属于这个库时才是顶层
+    直接抛 `ValueError`（这两个值只有一份，不是逐项校验），这一层需要
+    接住。
     """
     if account is None:
         return RedirectResponse("/login", status_code=303)
@@ -832,6 +846,21 @@ def batch_action_route(
 
     if action not in BATCH_ACTIONS:
         raise HTTPException(status_code=400, detail=f"不认识的批量操作：{action!r}")
+
+    if selection_mode == "all_filtered":
+        folder_id_value = int(folder_id) if folder_id.strip().isdigit() else None
+        try:
+            work_ids = resolve_selection(
+                session, library_id=library_id, mode="all_filtered",
+                view=view, tag_ids=tag_ids, folder_id=folder_id_value,
+            )
+        except (ValueError, TagNotFound, FolderNotFound) as error_detail:
+            return _back_to_list_with_error(
+                slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error=str(error_detail)
+            )
+    elif selection_mode != "explicit":
+        raise HTTPException(status_code=400, detail=f"不认识的 selection_mode：{selection_mode!r}")
+
     if not work_ids:
         return _back_to_list_with_error(
             slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error="没有选中任何文献"

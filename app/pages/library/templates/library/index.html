@@ -83,9 +83,16 @@
   {% if library_page.items %}
     <form id="batch-form" method="post" action="/l/{{ slug_and_id }}/batch" class="batch-bar">
       {{ hidden_state() }}
+      <input type="hidden" name="selection_mode" value="explicit" id="batch-selection-mode">
+      {% for tid in tag_ids %}<input type="hidden" name="tag_ids" value="{{ tid }}">{% endfor %}
+      <input type="hidden" name="folder_id" value="{{ folder_id or '' }}">
       <span class="batch-bar-picks">
-        <a href="#" onclick="document.querySelectorAll('.work-select').forEach(function(c){c.checked=true}); return false;">全选本页</a>
-        <a href="#" onclick="document.querySelectorAll('.work-select').forEach(function(c){c.checked=false}); return false;">清除</a>
+        <a href="#" onclick="document.querySelectorAll('.work-select').forEach(function(c){c.checked=true}); __setSelectionMode('explicit'); return false;">全选本页</a>
+        <a href="#" onclick="document.querySelectorAll('.work-select').forEach(function(c){c.checked=false}); __setSelectionMode('explicit'); return false;">清除</a>
+        <a href="#" onclick="__setSelectionMode('all_filtered'); return false;"
+           title="操作会作用于当前筛选条件下的全部 {{ library_page.total }} 篇，不限于本页勾选">
+          全选所有筛选结果（共 {{ library_page.total }} 篇）
+        </a>
       </span>
       <select name="target_tag_id">
         <option value="">选标签……</option>
@@ -271,6 +278,10 @@
 {% endblock %}
 {% block body_end %}
   <script>
+    function __setSelectionMode(mode) {
+      var el = document.getElementById('batch-selection-mode');
+      if (el) { el.value = mode; }
+    }
     function __prepRelPaths(form) {
       var fileInput = form.querySelector('input[type="file"]');
       if (!fileInput) { return; }
