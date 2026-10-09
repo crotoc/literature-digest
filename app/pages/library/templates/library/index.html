@@ -43,6 +43,37 @@
     </form>
   </div>
 
+  <form method="get" class="library-filters">
+    <input type="hidden" name="view" value="{{ view }}">
+    <input type="hidden" name="sort_by" value="{{ sort_by }}">
+    <input type="hidden" name="sort_dir" value="{{ sort_dir }}">
+    <fieldset class="library-filter-tags">
+      <legend>按标签筛选（同时满足）</legend>
+      {% if not all_tags %}
+        <span class="muted">还没有标签。</span>
+      {% endif %}
+      {% for tag in all_tags %}
+        <label class="tag-filter-option">
+          <input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag.id in tag_ids %}checked{% endif %}>
+          {{ tag.name }}
+        </label>
+      {% endfor %}
+    </fieldset>
+    <label class="library-filter-folder">
+      按文件夹筛选
+      <select name="folder_id">
+        <option value="">全部文件夹</option>
+        {% for folder in folders %}
+          <option value="{{ folder.id }}" {% if folder.id == folder_id %}selected{% endif %}>{{ folder.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="btn">筛选</button>
+    {% if tag_ids or folder_id %}
+      <a class="btn" href="?view={{ view }}&amp;sort_by={{ sort_by }}&amp;sort_dir={{ sort_dir }}">清除筛选</a>
+    {% endif %}
+  </form>
+
   <p class="muted">共 {{ library_page.total }} 篇</p>
 
   {% if not library_page.items %}

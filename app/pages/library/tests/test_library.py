@@ -30,6 +30,36 @@ def _import_sample(client) -> int:
     return int(match.group(1))
 
 
+def _import_with_title(client, *, title, year) -> int:
+    raw_text = f"TY  - JOUR\nTI  - {title}\nPY  - {year}///\nER  -\n"
+    r = client.post("/import", data={"format": "ris", "raw_text": raw_text})
+    match = re.search(r"work_id=(\d+)", r.text)
+    assert match is not None, r.text
+    return int(match.group(1))
+
+
+def _add_tag(client, library_url, work_id, name) -> int:
+    """既锚定 work_id 又锚定标签名本身——同一篇文献打了不止一个标签时，
+    裸的 `works/{work_id}/tags/(\\d+)/remove` 正则只会抓到页面上第一个
+    标签 chip 的 id（和之前 attachment 下载链接正则踩过的同一种坑）。
+    页面上同一个标签名还会在侧栏"按标签筛选"的 checkbox 里再出现一次
+    （那里只是个 input，后面没有 remove 链接），所以不能只取 `name`
+    第一次出现的位置——这里把 `name` 的每一处出现都试一遍，取第一个
+    紧跟着这个 work_id 自己的 remove 链接的那个。
+    """
+    response = client.post(
+        f"{library_url}works/{work_id}/tags/add",
+        data={"name": name, "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+    text = response.text
+    for name_match in re.finditer(re.escape(name), text):
+        window = text[name_match.start() : name_match.start() + 300]
+        tag_id_match = re.search(rf"works/{work_id}/tags/(\d+)/remove", window)
+        if tag_id_match is not None:
+            return int(tag_id_match.group(1))
+    raise AssertionError(f"没找到 {name} 对应 work {work_id} 的 remove 链接：{text}")
+
+
 # ── /library 入口 ────────────────────────────────────────────────────────
 
 
@@ -174,7 +204,11 @@ def test_add_tag_then_remove_tag(client):
         data={"view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
     )
     assert remove_response.status_code == 200
-    assert "machine-learning" not in remove_response.text
+    # 不能断言 "machine-learning" 整页消失——这个标签还在库里的标签池中
+    # （remove 只摘掉这篇文献和它的关联，不删标签本身），侧栏"按标签筛选"
+    # 的 checkbox 列表会继续显示它。断言缩小到"这篇文献卡片上的 remove
+    # 链接消失了"才是这个测试真正要测的事。
+    assert f"works/{work_id}/tags/{tag_id}/remove" not in remove_response.text
 
 
 def test_add_tag_with_blank_name_is_a_no_op(client):
@@ -190,6 +224,82 @@ def test_add_tag_with_blank_name_is_a_no_op(client):
 
     assert response.status_code == 200
     assert "tag-chip" not in response.text
+
+
+# ── 侧栏筛选 ─────────────────────────────────────────────────────────────
+
+
+def _create_folder(client, slug_and_id, name) -> int:
+    client.post(f"/l/{slug_and_id}/folders/create", data={"name": name})
+    folders_response = client.get(f"/l/{slug_and_id}/folders/")
+    name_idx = folders_response.text.find(name)
+    assert name_idx != -1, folders_response.text
+    folder_id_match = re.search(r"folders/(\d+)/rename", folders_response.text[name_idx:])
+    assert folder_id_match is not None, folders_response.text[name_idx:]
+    return int(folder_id_match.group(1))
+
+
+def test_filter_by_tag_id_shows_only_the_tagged_work(client):
+    _register(client, username="viv", email="viv@example.org")
+    kept_id = _import_with_title(client, title="Keep Me Paper", year=2021)
+    _import_with_title(client, title="Other Paper", year=2022)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    tag_id = _add_tag(client, library_url, kept_id, "filter-me")
+
+    response = client.get(library_url, params={"tag_ids": tag_id})
+
+    assert "Keep Me Paper" in response.text
+    assert "Other Paper" not in response.text
+
+
+def test_filter_by_multiple_tag_ids_is_and_semantics(client):
+    _register(client, username="wade", email="wade@example.org")
+    both_id = _import_with_title(client, title="Has Both Tags", year=2021)
+    only_one_id = _import_with_title(client, title="Has Only One Tag", year=2022)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    tag_a = _add_tag(client, library_url, both_id, "tag-a")
+    tag_b = _add_tag(client, library_url, both_id, "tag-b")
+    _add_tag(client, library_url, only_one_id, "tag-a")
+
+    response = client.get(library_url, params={"tag_ids": [tag_a, tag_b]})
+
+    assert "Has Both Tags" in response.text
+    assert "Has Only One Tag" not in response.text
+
+
+def test_filter_by_folder_id_shows_only_the_filed_work(client):
+    _register(client, username="xena", email="xena@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    slug_and_id = library_url.strip("/").removeprefix("l/")
+    filed_id = _import_with_title(client, title="Filed Paper", year=2021)
+    _import_with_title(client, title="Unfiled Paper", year=2022)
+    folder_id = _create_folder(client, slug_and_id, "my-folder")
+    client.post(f"{library_url}works/{filed_id}/folders/add", data={"folder_id": str(folder_id)})
+
+    response = client.get(library_url, params={"folder_id": folder_id})
+
+    assert "Filed Paper" in response.text
+    assert "Unfiled Paper" not in response.text
+
+
+def test_filter_rejects_tag_id_from_another_library(client):
+    _register(client, username="yana", email="yana@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    work_id = _import_with_title(client, title="Yana Paper", year=2021)
+    other_tag_id = _add_tag(client, library_url, work_id, "yana-tag")
+    client.post("/logout")
+
+    _register(client, username="zack", email="zack@example.org")
+    other_lib_response = client.get("/library")
+    other_library_url = str(other_lib_response.url).replace("http://testserver", "")
+
+    response = client.get(other_library_url, params={"tag_ids": other_tag_id})
+
+    assert response.status_code == 400
 
 
 # ── 笔记 ─────────────────────────────────────────────────────────────────

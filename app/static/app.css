@@ -175,3 +175,9 @@ code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em
 .log-level-warning { color: #d97706; }
 
 .export-with-attachments { display: inline-flex; gap: 0.25rem; align-items: center; font-size: 0.9rem; }
+
+.library-filters { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin: 0.5rem 0 1rem; }
+.library-filter-tags { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; border: none; padding: 0; margin: 0; }
+.library-filter-tags legend { font-size: 0.8rem; color: var(--muted); padding: 0; }
+.tag-filter-option { display: inline-flex; gap: 0.2rem; align-items: center; font-size: 0.9rem; }
+.library-filter-folder { display: inline-flex; gap: 0.35rem; align-items: center; font-size: 0.9rem; }

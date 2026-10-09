@@ -21,11 +21,23 @@ list_library_page()——按 view(all/trash) + 排序 + 分页浏览卡片列表
 的单项操作（`bulk_add_to_folder`/`bulk_remove_from_folder`，work_ids=[单个
 id]）——它们内部已经用 `_check_work_scope` 校验了 work_id 真的属于传入的
 library_id（和 bulk_remove_tag 同一个安全模型），所以这两条路由不需要像
-笔记/元数据那样另外调 `_require_work_in_library`。标签侧栏 AND 筛选、文件
-夹筛选、三态勾选/全选所有筛选结果、批量打标签/移文件夹/编辑/导出（只导出
-选中项而不是整库）、彻底删除这些全部留给后续增量——批量操作要先有
-"选择集"这个前端状态才有意义,而「两处已定」第 2 条明确选择集的服务端
-解析是独立的一块,不该现在就为了这几个按钮囫囵顺带做了。
+笔记/元数据那样另外调 `_require_work_in_library`。
+
+侧栏筛选（标签 AND 筛选 + 单选文件夹）接的是 `features.library_browse`
+早就支持的 `tag_ids`/`folder_id` 参数——`list_library_page` 和背后的
+`resolve_selection`（给「两处已定」第 2 条"全选所有筛选结果"用）本来就
+认识这两个参数，只是页面层这次才接上，不是重新设计。**刻意裁剪**：
+`tag_ids`/`folder_id` 只在 GET 这条读路径上生效，单篇操作（打标签/删除/
+编辑等）走的各个 POST 路由重定向回列表页时**不会**保留当前筛选——和
+这页本来就有的"点全部/回收站 tab 会丢排序方向"是同一类已接受的粗糙边
+（`_back_to_list` 只认 view/sort_by/sort_dir/page 四个字段），真要补齐
+需要把 tag_ids/folder_id 一并塞进 `hidden_state()` 宏和全部 ~13 个
+`_back_to_list` 调用点,属于下一个增量的范围,不在这次顺带做。"未归档"
+（没有任何文件夹的文献）不支持——`_compile_filter_work_ids` 的
+`folder_id` 语义是"属于这个文件夹"，没有"不属于任何文件夹"这个反向
+查询。三态勾选/全选所有筛选结果（UI 侧）、批量打标签/移文件夹/编辑/
+导出（只导出选中项而不是整库）、彻底删除这些仍然留给后续增量——
+批量操作要先有"选择集"这个前端状态才有意义。
 
 附件这次只接 features/uploading 的单文件上传/下载/删除三个单项操作，
 `BlobStore` 实例由 app/shell/deps.py 的 `blob_store()` 依赖注入（装配层
@@ -66,8 +78,9 @@ from caps.bibformats import SUPPORTED_FORMATS
 from caps.slug import slugify
 from domain.accounts import AccountDTO
 from domain.attachments import AttachmentDTO, AttachmentNotFound, get_attachment, set_main_attachment
-from domain.folders import list_folders
+from domain.folders import FolderNotFound, list_folders
 from domain.libraries import LibraryDTO, LibraryNotFound, list_libraries_for_account, resolve_scope
+from domain.tags import TagNotFound, list_tags
 from domain.works import WorkNotFound, get_work, list_work_ids
 from features.annotating import set_work_note, update_metadata
 from features.exporting import (
@@ -195,6 +208,8 @@ def library_view(
     sort_by: str = DEFAULT_SORT_BY,
     sort_dir: str = DEFAULT_SORT_DIR,
     page: int = Query(1, ge=1),
+    tag_ids: list[int] = Query([]),
+    folder_id: int | None = None,
     error: str | None = None,
     account: AccountDTO | None = Depends(current_account),
     session=Depends(db),
@@ -208,15 +223,22 @@ def library_view(
         raise HTTPException(status_code=400, detail="筛选/排序参数不对")
 
     page_size = DEFAULT_PAGE_SIZE
-    library_page = list_library_page(
-        session,
-        library_id=library_id,
-        view=view,
-        sort_by=sort_by,
-        sort_dir=sort_dir,
-        limit=page_size,
-        offset=(page - 1) * page_size,
-    )
+    try:
+        library_page = list_library_page(
+            session,
+            library_id=library_id,
+            view=view,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            tag_ids=tag_ids,
+            folder_id=folder_id,
+            limit=page_size,
+            offset=(page - 1) * page_size,
+        )
+    except (TagNotFound, FolderNotFound):
+        raise HTTPException(status_code=400, detail="筛选条件里有不存在的标签/文件夹") from None
+    except ValueError as error_detail:
+        raise HTTPException(status_code=400, detail=str(error_detail)) from None
     total_pages = max(1, -(-library_page.total // page_size))
 
     # 逐条 N+1 查询——和 library_browse 自己给 tags/folders/attachments 用的
@@ -237,9 +259,12 @@ def library_view(
             for card in library_page.items
         }
 
-    # 给每张卡片"加入文件夹"下拉用——库内文件夹数量级和标签池一样小，
-    # 一次查询够用，不需要为此单开 features 函数。
+    # 给每张卡片"加入文件夹"下拉、以及侧栏"按文件夹筛选"共用——库内文件夹
+    # 数量级和标签池一样小，一次查询够用，不需要为此单开 features 函数。
     folders = list_folders(session, library_id=library_id)
+    # 侧栏"按标签 AND 筛选"用；同一份 all_tags 也给上面"打标签"下拉复用
+    # 省一次查询——两处本来就是同一个库内标签池。
+    all_tags = list_tags(session, library_id=library_id)
 
     return templates.TemplateResponse(
         request,
@@ -250,10 +275,13 @@ def library_view(
             "library_page": library_page,
             "citation_by_work_id": citation_by_work_id,
             "folders": folders,
+            "all_tags": all_tags,
             "view": view,
             "sort_by": sort_by,
             "sort_dir": sort_dir,
             "page": page,
+            "tag_ids": tag_ids,
+            "folder_id": folder_id,
             "total_pages": total_pages,
             "error": error,
             "viewable_content_types": VIEWABLE_CONTENT_TYPES,
