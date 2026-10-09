@@ -16,7 +16,7 @@ from infra.config import REPO_ROOT, settings
 
 def create_app(*, create_tables: bool | None = None) -> FastAPI:
     config = settings()
-    app_logging.configure(config.log_level)
+    app_logging.configure(config.log_level, config.log_file)
 
     application = FastAPI(title="literature-digest", docs_url=None, redoc_url=None)
     application.add_middleware(RequestContextMiddleware)

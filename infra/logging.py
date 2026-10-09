@@ -7,6 +7,7 @@ import json
 import logging
 import sys
 from contextvars import ContextVar
+from pathlib import Path
 
 _request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
 
@@ -36,9 +37,22 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False)
 
 
-def configure(level: str = "INFO") -> None:
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonFormatter())
+def configure(level: str = "INFO", log_file: str | Path | None = None) -> None:
+    """stdout handler 总是有（本地跑/容器日志采集都认它）；log_file
+    给了就额外加一个文件 handler——这是 features/logs_viewer 读/清/导的
+    唯一数据源，所以两个 handler 用同一个 JsonFormatter，保证落盘格式和
+    屏幕上看到的一致。父目录不存在就先建好，避免 FileHandler 直接报错。
+    """
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    if log_file:
+        path = Path(log_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(path, encoding="utf-8"))
+
+    formatter = JsonFormatter()
+    for handler in handlers:
+        handler.setFormatter(formatter)
+
     root = logging.getLogger()
-    root.handlers[:] = [handler]
+    root.handlers[:] = handlers
     root.setLevel(level.upper())

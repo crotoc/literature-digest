@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/dev.sqlite3"
     blob_root: Path = REPO_ROOT / "data" / "blobs"
     log_level: str = "INFO"
+    # JSON Lines，和 blob_root 一样常驻磁盘而非可选——features/logs_viewer
+    # 的读/清/导三个操作都要有一个具体文件可以指向，不做『不落盘就什么都
+    # 读不到』这种默认行为。
+    log_file: Path = REPO_ROOT / "data" / "app.log"
     timezone: str = "UTC"
     allow_self_signup: bool = True
 
