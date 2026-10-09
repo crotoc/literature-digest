@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}去重复核 · literature-digest{% endblock %}
+{% macro authors_line(work) %}
+  {% for author in work.authors %}{{ author.literal or ((author.family or "") ~ (" " ~ author.given if author.given else "")) }}{% if not loop.last %}; {% endif %}{% endfor %}
+{% endmacro %}
+{% block content %}
+  <h2>去重复核</h2>
+
+  {% if error %}
+    <p class="alert alert-error">{{ error }}</p>
+  {% endif %}
+
+  {% if not pairs %}
+    <p class="muted">没有待复核的疑似重复。</p>
+  {% endif %}
+
+  <ul class="dedupe-pair-list">
+    {% for pair in pairs %}
+      <li class="dedupe-pair card">
+        <div class="dedupe-pair-sides">
+          <div class="dedupe-side">
+            <h3>{{ pair.work.title or "（无标题）" }}</h3>
+            <p class="muted">{{ authors_line(pair.work) }}{% if pair.work.year %} · {{ pair.work.year }}{% endif %}</p>
+            <p class="muted">{{ pair.work.container_title or "" }}</p>
+            <form method="post" class="dedupe-merge-form"
+                  action="/l/{{ slug_and_id }}/dedupe/{{ pair.candidate.id }}/merge">
+              <input type="hidden" name="keep" value="work">
+              <button type="submit" class="btn">保留这一条</button>
+            </form>
+          </div>
+          <div class="dedupe-side">
+            <h3>{{ pair.candidate_work.title or "（无标题）" }}</h3>
+            <p class="muted">{{ authors_line(pair.candidate_work) }}{% if pair.candidate_work.year %} · {{ pair.candidate_work.year }}{% endif %}</p>
+            <p class="muted">{{ pair.candidate_work.container_title or "" }}</p>
+            <form method="post" class="dedupe-merge-form"
+                  action="/l/{{ slug_and_id }}/dedupe/{{ pair.candidate.id }}/merge">
+              <input type="hidden" name="keep" value="candidate">
+              <button type="submit" class="btn">保留这一条</button>
+            </form>
+          </div>
+        </div>
+        <p class="muted">判定依据：{{ pair.candidate.reason }}</p>
+        <form method="post" class="dedupe-dismiss-form"
+              action="/l/{{ slug_and_id }}/dedupe/{{ pair.candidate.id }}/dismiss">
+          <button type="submit" class="btn">驳回（不是同一篇）</button>
+        </form>
+      </li>
+    {% endfor %}
+  </ul>
+{% endblock %}
