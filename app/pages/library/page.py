@@ -1,4 +1,4 @@
-"""app/pages/library：文献库卷目列表 + 删除/回收站恢复 + 单篇打标签/笔记/元数据编辑。
+"""app/pages/library：文献库卷目列表 + 删除/回收站恢复 + 单篇打标签/笔记/元数据编辑 + 整库导出。
 
 v1 范围的刻意裁剪：读路径接 features/library_browse 的
 list_library_page()——按 view(all/trash) + 排序 + 分页浏览卡片列表。
@@ -6,9 +6,14 @@ list_library_page()——按 view(all/trash) + 排序 + 分页浏览卡片列表
 软删/恢复、"顺手新建标签再打上"、去掉某一个标签；外加 features/annotating
 的笔记读写（list_library_page 的 LibraryCard 已经带了 note 字段，省了
 一次额外查询）和标量元数据编辑（标题/年份/期刊或书名/摘要，authors 等
-结构化字段不在内）。标签侧栏 AND 筛选、文件夹筛选、三态勾选/全选所有
-筛选结果、批量打标签/移文件夹/编辑、彻底删除、附件上传/预览这些全部
-留给后续增量——批量操作要先有"选择集"这个前端状态才有意义,而「两处已定」
+结构化字段不在内）。导出目前只有"整个文库导出成一份 RIS/BibTeX/
+CSL-JSON 文本文件"（features.exporting.export_bibliography），不含附件
+的 ZIP 导出（要 features/uploading 落地的附件才有意义）、不含单条引用
+文本/格式化引用串复制（那是「两处已定」之外、页面梳理②的"引用"小节，
+和"导出整个文库"不是同一个 UI 决策，留给下一个增量）。标签侧栏 AND
+筛选、文件夹筛选、三态勾选/全选所有筛选结果、批量打标签/移文件夹/编辑/
+导出（只导出选中项而不是整库）、彻底删除、附件上传/预览这些全部留给
+后续增量——批量操作要先有"选择集"这个前端状态才有意义,而「两处已定」
 第 2 条明确选择集的服务端解析是独立的一块,不该现在就为了这几个按钮囫囵
 顺带做了。
 
@@ -19,16 +24,18 @@ URL 用 `/l/<name-slug>-<id>/`——只认尾部数字 id，slug 前缀纯装饰
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app.shell.deps import current_account, db
 from app.shell.registry import NavItem
 from app.shell.templating import templates
+from caps.bibformats import SUPPORTED_FORMATS
 from caps.slug import slugify
 from domain.accounts import AccountDTO
 from domain.libraries import LibraryDTO, LibraryNotFound, list_libraries_for_account, resolve_scope
-from domain.works import WorkNotFound, get_work
+from domain.works import WorkNotFound, get_work, list_work_ids
 from features.annotating import set_work_note, update_metadata
+from features.exporting import export_bibliography
 from features.library_browse import (
     DEFAULT_PAGE_SIZE,
     DEFAULT_SORT_BY,
@@ -292,3 +299,40 @@ def edit_metadata_route(
         abstract=abstract.strip() or None,
     )
     return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+_EXPORT_CONTENT_TYPES = {
+    "ris": "application/x-research-info-systems",
+    "bibtex": "text/x-bibtex",
+    "csljson": "application/json",
+}
+_EXPORT_EXTENSIONS = {"ris": "ris", "bibtex": "bib", "csljson": "json"}
+
+
+@router.get("/l/{slug_and_id}/export")
+def export_library_route(
+    slug_and_id: str,
+    format: str = "ris",
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+
+    if format not in SUPPORTED_FORMATS:
+        raise HTTPException(status_code=400, detail=f"不支持的导出格式：{format!r}")
+
+    # 只导出未删除的条目——回收站里的东西用户已经表示不要了，导出当作
+    # "还在库里的内容快照"，跟 library_browse 的 all 视图默认排除已删
+    # 是同一个方向。不分页、不走选择集：v1 范围就是"整库"，批量/选中项
+    # 导出留给选择集机制落地之后。
+    work_ids = list_work_ids(session, library_id=library_id)
+    body = export_bibliography(session, library_id=library_id, work_ids=work_ids, format=format)
+
+    ext = _EXPORT_EXTENSIONS[format]
+    return Response(
+        content=body,
+        media_type=_EXPORT_CONTENT_TYPES[format],
+        headers={"Content-Disposition": f'attachment; filename="library.{ext}"'},
+    )

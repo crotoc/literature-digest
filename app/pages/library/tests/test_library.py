@@ -366,3 +366,68 @@ def test_edit_metadata_rejects_work_id_from_another_library(client):
     check_response = client.get(dina_library_url)
     assert "越权改写标题" not in check_response.text
     assert "A Sample Paper" in check_response.text
+
+
+# ── 导出整库 ─────────────────────────────────────────────────────────────
+
+
+def test_export_ris_contains_the_imported_work(client):
+    _register(client, username="finn", email="finn@example.org")
+    _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.get(f"{library_url}export", params={"format": "ris"})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/x-research-info-systems")
+    assert "attachment" in response.headers["content-disposition"]
+    assert "A Sample Paper" in response.text
+
+
+def test_export_bibtex_and_csljson_also_work(client):
+    _register(client, username="greta", email="greta@example.org")
+    _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    bibtex_response = client.get(f"{library_url}export", params={"format": "bibtex"})
+    assert bibtex_response.status_code == 200
+    assert "A Sample Paper" in bibtex_response.text
+
+    csljson_response = client.get(f"{library_url}export", params={"format": "csljson"})
+    assert csljson_response.status_code == 200
+    assert "A Sample Paper" in csljson_response.text
+
+
+def test_export_rejects_unsupported_format(client):
+    _register(client, username="hugo", email="hugo@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.get(f"{library_url}export", params={"format": "docx"})
+
+    assert response.status_code == 400
+
+
+def test_export_excludes_trashed_work(client):
+    _register(client, username="iris", email="iris@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    client.post(f"{library_url}works/{work_id}/delete", data={"view": "all"})
+
+    response = client.get(f"{library_url}export", params={"format": "ris"})
+    assert "A Sample Paper" not in response.text
+
+
+def test_export_requires_login(client):
+    _register(client, username="jace", email="jace@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    response = client.get(f"{library_url}export", params={"format": "ris"})
+
+    assert str(response.url).endswith("/login")

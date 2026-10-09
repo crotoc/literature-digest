@@ -26,6 +26,14 @@
         <option value="asc" {% if sort_dir == "asc" %}selected{% endif %}>升序</option>
       </select>
     </form>
+    <form method="get" action="/l/{{ slug_and_id }}/export" class="export-form">
+      <select name="format">
+        <option value="ris">RIS</option>
+        <option value="bibtex">BibTeX</option>
+        <option value="csljson">CSL-JSON</option>
+      </select>
+      <button type="submit" class="btn">导出整个文库</button>
+    </form>
   </div>
 
   <p class="muted">共 {{ library_page.total }} 篇</p>
