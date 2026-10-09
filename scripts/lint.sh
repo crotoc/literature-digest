@@ -84,16 +84,36 @@ else
       # test_<x>.py 会因 ImportError 炸掉，被误判成"删掉它导致别处红了"。
       # 所以按约定把同名的 tests/test_<x>.py 一起挪开，不计入"其余"。
       test_counterpart=""
+      dependents=""
       case "$t" in
         adapters/*/*.py)
           cand="$(dirname "$t")/tests/test_${base}"
           [ -f "$cand" ] && test_counterpart="$cand"
+          # 同一个 adapter 实现可能被某个 feature/domain 模块按名字直接
+          # import（比如 features/metadata_lookup 同时需要 crossref 和
+          # pubmed 两个互不可替代的数据源——不是同一能力的两个可互换实现，
+          # 删掉其中一个必然导致那个直接依赖方自己的测试炸）。这是设计
+          # 使然的局部后果，不是"删掉一个可插拔件波及了无关模块"，不该
+          # 算进本规则——和上面挪开 adapter 自己的 co-located 测试是同一个
+          # 道理，这里把直接依赖方的整个目录也一起挪开。
+          modpath=$(printf '%s' "${t%.py}" | tr '/' '.')
+          modpath_re=$(printf '%s' "$modpath" | sed 's/\./\\./g')
+          dependents=$(grep -rlE "(from|import)[[:space:]]+${modpath_re}\\b" --include='*.py' \
+                         features/ domain/ 2>/dev/null \
+                       | sed -E 's#^(features|domain)/([^/]+)/.*#\1/\2#' | sort -u)
           ;;
       esac
       mv "$t" "$stash/" 2>/dev/null || continue
       if [ -n "$test_counterpart" ]; then
         mv "$test_counterpart" "$stash/$(basename "$test_counterpart")"
       fi
+      moved_dependents=""
+      for dep in $dependents; do
+        [ -d "$dep" ] || continue
+        dep_stash="$stash/$(printf '%s' "$dep" | tr '/' '_')"
+        mv "$dep" "$dep_stash"
+        moved_dependents="$moved_dependents $dep:$dep_stash"
+      done
       if ! "$PY" -m pytest -q -p no:cacheprovider >/dev/null 2>&1; then
         report 7 "删掉 $t 后 pytest 不绿（存在隐式依赖）" "$t"
       fi
@@ -102,6 +122,9 @@ else
       if [ -n "$test_counterpart" ]; then
         mv "$stash/$(basename "$test_counterpart")" "$test_counterpart"
       fi
+      for pair in $moved_dependents; do
+        mv "${pair#*:}" "${pair%%:*}"
+      done
     done
     rmdir "$stash" 2>/dev/null || true
     [ "$fail" = "0" ] && ok 7 '任一 adapter/feature 可删'

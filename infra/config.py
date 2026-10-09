@@ -20,6 +20,11 @@ class Settings(BaseSettings):
 
     app_env: str = "dev"
     app_secret_key: str
+    # `caps.secrets.derive_key` 的 salt 参数——和 app_secret_key 一起派生出
+    # 具体用途（如 domain/connections 的凭据加密）的 Fernet 密钥。单独一个
+    # 字段而不是复用 app_secret_key 本身，因为 app_secret_key 只是人能管理
+    # 的口令，不保证是合法的 44 字符 base64 Fernet 密钥。
+    app_secret_salt: str
     database_url: str = "sqlite:///./data/dev.sqlite3"
     blob_root: Path = REPO_ROOT / "data" / "blobs"
     log_level: str = "INFO"
@@ -31,6 +36,13 @@ class Settings(BaseSettings):
     def _long_enough(cls, value: str) -> str:
         if len(value) < 32:
             raise ValueError("APP_SECRET_KEY 至少 32 字符")
+        return value
+
+    @field_validator("app_secret_salt")
+    @classmethod
+    def _salt_long_enough(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError("APP_SECRET_SALT 至少 8 字符")
         return value
 
 
