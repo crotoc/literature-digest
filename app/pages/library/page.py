@@ -125,6 +125,8 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Upl
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 
 from app.shell.deps import (
+    ai_llm_resolve,
+    ai_llm_transport,
     blob_store,
     current_account,
     db,
@@ -140,7 +142,14 @@ from domain.attachments import AttachmentDTO, AttachmentNotFound, get_attachment
 from domain.folders import FolderNotFound, list_folders
 from domain.libraries import LibraryDTO, LibraryNotFound, list_libraries_for_account, resolve_scope
 from domain.tags import TagNotFound, list_tags, reorder_tags
-from domain.works import WorkNotFound, get_work, list_work_ids
+from domain.works import WorkNotFound, get_work, list_provenance, list_work_ids
+from features.ai_enrichment import (
+    AiEnrichmentError,
+    assess_work,
+    bulk_assess_works,
+    list_ai_profiles,
+    resolve_ai_profile,
+)
 from features.annotating import set_work_note, update_metadata
 from features.exporting import (
     cite_formatted,
@@ -173,6 +182,7 @@ from features.organizing import (
     purge_works,
 )
 from features.pdf_reading import VIEWABLE_CONTENT_TYPES, NotViewable, open_for_view
+from features.tag_grouping import TagGroupingError, merge_tags, propose_ai_duplicates, propose_ai_groups
 from features.uploading import (
     FilenameConflict,
     UploadInput,
@@ -256,7 +266,9 @@ def _back_to_list_with_error(
     return RedirectResponse(url, status_code=303)
 
 
-BATCH_ACTIONS = ("add_tag", "remove_tag", "add_folder", "remove_folder", "delete", "restore", "purge")
+BATCH_ACTIONS = (
+    "add_tag", "remove_tag", "add_folder", "remove_folder", "delete", "restore", "purge", "ai_assess"
+)
 
 
 def _require_target_id(value: str, label: str) -> int:
@@ -264,6 +276,24 @@ def _require_target_id(value: str, label: str) -> int:
     if not value.isdigit():
         raise HTTPException(status_code=400, detail=f"没有选 {label}")
     return int(value)
+
+
+def _resolve_default_ai_connection_id(session, account_id: int) -> int | None:
+    """AI 点评 / AI 标签提案都需要"用哪个 ai_profile 连接"这个决定，但这
+    页不管理连接本身（那是 app/pages/settings 的事）——这里只在已配置的
+    连接里选一个：优先选被设为默认且启用的那个，没设默认就退而选第一个
+    启用的；一个启用的都没有就返回 `None`，调用方据此提示去设置页配置。
+    """
+    profiles = [profile for profile in list_ai_profiles(session, account_id=account_id) if profile.enabled]
+    if not profiles:
+        return None
+    for profile in profiles:
+        if profile.is_default:
+            return profile.id
+    return profiles[0].id
+
+
+_NO_AI_PROFILE_ERROR = "还没有配置可用的 AI 模型连接，请先在设置页新建一个"
 
 
 @router.get("/library", response_class=HTMLResponse)
@@ -278,28 +308,26 @@ def library_entry(account: AccountDTO | None = Depends(current_account), session
     return RedirectResponse(_library_url(libraries[0]), status_code=303)
 
 
-@router.get("/l/{slug_and_id}/", response_class=HTMLResponse)
-def library_view(
+def _build_library_context(
+    *,
     slug_and_id: str,
-    request: Request,
-    view: str = DEFAULT_VIEW,
-    sort_by: str = DEFAULT_SORT_BY,
-    sort_dir: str = DEFAULT_SORT_DIR,
-    page: int = Query(1, ge=1),
-    tag_ids: list[int] = Query([]),
-    folder_id: int | None = None,
-    error: str | None = None,
-    account: AccountDTO | None = Depends(current_account),
-    session=Depends(db),
-):
-    if account is None:
-        return RedirectResponse("/login", status_code=303)
-
-    library_id = _require_library(session, account.id, slug_and_id)
-
-    if view not in VIEWS or sort_by not in SORT_KEYS or sort_dir not in ("asc", "desc"):
-        raise HTTPException(status_code=400, detail="筛选/排序参数不对")
-
+    library_id: int,
+    view: str,
+    sort_by: str,
+    sort_dir: str,
+    page: int,
+    tag_ids: list[int],
+    folder_id: int | None,
+    error: str | None,
+    account: AccountDTO,
+    session,
+) -> dict:
+    """列表页正文的上下文组装，从 `library_view` 拆出来是因为 AI 标签提案
+    （`propose_tag_groups_route`/`propose_tag_duplicates_route`）也需要
+    重新渲染这整页——提案本身不落库，POST 后不能走"303 重定向回列表页"
+    这套惯例（重定向会丢这次算出来的提案），只能原地把结果塞进上下文
+    重新渲染，和这条 GET 路由渲染的是同一个模板、同一套上下文字段。
+    """
     page_size = DEFAULT_PAGE_SIZE
     try:
         library_page = list_library_page(
@@ -328,43 +356,81 @@ def library_view(
     # trash 视图里全是软删条目，调了必定 WorkNotFound。这不是裁剪掉一个
     # 真的能用的功能，是 features/exporting 这一层本来就没有这个能力——
     # 回收站是"要不要恢复"的分流页，不是编辑/引用的地方，和下面模板里
-    # 笔记/元数据编辑面板只在 all 视图露出是同一个方向。
+    # 笔记/元数据编辑面板只在 all 视图露出是同一个方向。AI 点评结果
+    # （`ai_latest_by_work_id`）同一个判断：trash 条目没有必要重新点评，
+    # 展示它上一次的点评结果也没意义。
     citation_by_work_id = {}
+    ai_latest_by_work_id = {}
     if view == "all":
         citation_style = resolve_citation_style(session, account_id=account.id)
-        citation_by_work_id = {
-            card.work.id: cite_formatted(session, work_id=card.work.id, style=citation_style)
-            for card in library_page.items
-        }
+        for card in library_page.items:
+            citation_by_work_id[card.work.id] = cite_formatted(
+                session, work_id=card.work.id, style=citation_style
+            )
+            latest_ai = next(
+                (p for p in list_provenance(session, card.work.id) if p.source == "ai_enrichment"), None
+            )
+            if latest_ai is not None:
+                ai_latest_by_work_id[card.work.id] = latest_ai
 
     # 给每张卡片"加入文件夹"下拉、以及侧栏"按文件夹筛选"共用——库内文件夹
     # 数量级和标签池一样小，一次查询够用，不需要为此单开 features 函数。
     folders = list_folders(session, library_id=library_id)
-    # 侧栏"按标签 AND 筛选"用；同一份 all_tags 也给上面"打标签"下拉复用
-    # 省一次查询——两处本来就是同一个库内标签池。
+    # 侧栏"按标签 AND 筛选"用；同一份 all_tags 也给上面"打标签"下拉、标签
+    # 合并选框、AI 提案展示（按 id 查名字）复用——省掉额外查询。
     all_tags = list_tags(session, library_id=library_id)
+    all_tags_by_id = {tag.id: tag for tag in all_tags}
 
-    return templates.TemplateResponse(
-        request,
-        "library/index.html",
-        {
-            "active_nav": "library",
-            "slug_and_id": slug_and_id,
-            "library_page": library_page,
-            "citation_by_work_id": citation_by_work_id,
-            "folders": folders,
-            "all_tags": all_tags,
-            "view": view,
-            "sort_by": sort_by,
-            "sort_dir": sort_dir,
-            "page": page,
-            "tag_ids": tag_ids,
-            "folder_id": folder_id,
-            "total_pages": total_pages,
-            "error": error,
-            "viewable_content_types": VIEWABLE_CONTENT_TYPES,
-        },
+    return {
+        "active_nav": "library",
+        "slug_and_id": slug_and_id,
+        "library_page": library_page,
+        "citation_by_work_id": citation_by_work_id,
+        "ai_latest_by_work_id": ai_latest_by_work_id,
+        "folders": folders,
+        "all_tags": all_tags,
+        "all_tags_by_id": all_tags_by_id,
+        "view": view,
+        "sort_by": sort_by,
+        "sort_dir": sort_dir,
+        "page": page,
+        "tag_ids": tag_ids,
+        "folder_id": folder_id,
+        "total_pages": total_pages,
+        "error": error,
+        "viewable_content_types": VIEWABLE_CONTENT_TYPES,
+        "ai_proposals": (),
+        "ai_proposal_kind": None,
+    }
+
+
+@router.get("/l/{slug_and_id}/", response_class=HTMLResponse)
+def library_view(
+    slug_and_id: str,
+    request: Request,
+    view: str = DEFAULT_VIEW,
+    sort_by: str = DEFAULT_SORT_BY,
+    sort_dir: str = DEFAULT_SORT_DIR,
+    page: int = Query(1, ge=1),
+    tag_ids: list[int] = Query([]),
+    folder_id: int | None = None,
+    error: str | None = None,
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+
+    library_id = _require_library(session, account.id, slug_and_id)
+
+    if view not in VIEWS or sort_by not in SORT_KEYS or sort_dir not in ("asc", "desc"):
+        raise HTTPException(status_code=400, detail="筛选/排序参数不对")
+
+    context = _build_library_context(
+        slug_and_id=slug_and_id, library_id=library_id, view=view, sort_by=sort_by, sort_dir=sort_dir,
+        page=page, tag_ids=tag_ids, folder_id=folder_id, error=error, account=account, session=session,
     )
+    return templates.TemplateResponse(request, "library/index.html", context)
 
 
 @router.post("/l/{slug_and_id}/works/{work_id}/delete")
@@ -486,6 +552,174 @@ def move_tag_route(
         current_order[index], current_order[neighbor] = current_order[neighbor], current_order[index]
         reorder_tags(session, library_id=library_id, tag_ids_in_order=current_order)
 
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+@router.post("/l/{slug_and_id}/tags/merge")
+def merge_tags_route(
+    slug_and_id: str,
+    tag_ids: list[int] = Form([]),
+    target_name: str = Form(""),
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    """手动建组——勾选 ≥2 个标签 + 填合并后的名字，`merge_tags` 自己会把
+    `tag_ids` 去重、校验都属于这个库（见 features/tag_grouping 自己的
+    docstring），这里只做"至少选两个、名字不能空"这道页面层能直接拒绝
+    的检查,省一次往返。AI 分组/重复提案确认合并走的也是这同一条路由
+    （模板里那两份表单只是预填了 `tag_ids`/`target_name` 的隐藏表单）。
+    """
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+
+    if len(set(tag_ids)) < 2 or not target_name.strip():
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page,
+            error="合并标签至少需要选 2 个不同的标签，并填写合并后的标签名",
+        )
+
+    try:
+        merge_tags(
+            session, account_id=account.id, library_id=library_id, tag_ids=tag_ids, target_name=target_name
+        )
+    except (TagNotFound, TagGroupingError, ValueError) as error_detail:
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error=str(error_detail)
+        )
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+def _propose_tag_clusters(
+    propose_fn,
+    kind_label: str,
+    *,
+    slug_and_id: str,
+    request: Request,
+    view: str,
+    sort_by: str,
+    sort_dir: str,
+    page: int,
+    account: AccountDTO | None,
+    session,
+    transport,
+    resolve,
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+
+    connection_id = _resolve_default_ai_connection_id(session, account.id)
+    error: str | None = None
+    proposals: tuple = ()
+    if connection_id is None:
+        error = _NO_AI_PROFILE_ERROR
+    else:
+        try:
+            provider, model, base_url, api_key = resolve_ai_profile(session, connection_id)
+            proposals = tuple(
+                propose_fn(
+                    session, library_id=library_id, provider=provider, model=model,
+                    api_key=api_key, base_url=base_url, transport=transport, resolve=resolve,
+                )
+            )
+        except (ValueError, TagGroupingError) as error_detail:
+            error = str(error_detail)
+
+    # 提案是无状态的——不落库，所以不能走"POST 后 303 重定向回列表页"这套
+    # 惯例（重定向会丢这次算出来的提案），改成原地重新渲染同一个模板。
+    # 和这页其余表单一样不保留当前的 tag_ids/folder_id 筛选——页面模块
+    # docstring 里已经承认的同一类粗糙边。
+    context = _build_library_context(
+        slug_and_id=slug_and_id, library_id=library_id, view=view, sort_by=sort_by, sort_dir=sort_dir,
+        page=page, tag_ids=[], folder_id=None, error=error, account=account, session=session,
+    )
+    context["ai_proposals"] = proposals
+    context["ai_proposal_kind"] = kind_label
+    return templates.TemplateResponse(request, "library/index.html", context)
+
+
+@router.post("/l/{slug_and_id}/tags/propose-groups")
+def propose_tag_groups_route(
+    slug_and_id: str,
+    request: Request,
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+    transport=Depends(ai_llm_transport),
+    resolve=Depends(ai_llm_resolve),
+):
+    return _propose_tag_clusters(
+        propose_ai_groups, "AI 分组提案",
+        slug_and_id=slug_and_id, request=request, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page,
+        account=account, session=session, transport=transport, resolve=resolve,
+    )
+
+
+@router.post("/l/{slug_and_id}/tags/propose-duplicates")
+def propose_tag_duplicates_route(
+    slug_and_id: str,
+    request: Request,
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+    transport=Depends(ai_llm_transport),
+    resolve=Depends(ai_llm_resolve),
+):
+    return _propose_tag_clusters(
+        propose_ai_duplicates, "AI 重复标签",
+        slug_and_id=slug_and_id, request=request, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page,
+        account=account, session=session, transport=transport, resolve=resolve,
+    )
+
+
+@router.post("/l/{slug_and_id}/works/{work_id}/ai-assess")
+def ai_assess_work_route(
+    slug_and_id: str,
+    work_id: int,
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+    transport=Depends(ai_llm_transport),
+    resolve=Depends(ai_llm_resolve),
+):
+    """`assess_work` 内部已经会核对 `work_id` 真的属于传入的 `library_id`
+    （不属于就抛 `ValueError`，被下面接住），和 `add_tag_route`/
+    `remove_tag_route` 不额外调 `_require_work_in_library` 是同一个理由——
+    不需要在页面层重复一次查询。
+    """
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+
+    connection_id = _resolve_default_ai_connection_id(session, account.id)
+    if connection_id is None:
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error=_NO_AI_PROFILE_ERROR
+        )
+
+    try:
+        assess_work(
+            session, account_id=account.id, library_id=library_id, work_id=work_id,
+            connection_id=connection_id, transport=transport, resolve=resolve,
+        )
+    except (ValueError, AiEnrichmentError) as error_detail:
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error=str(error_detail)
+        )
     return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
 
 
@@ -1125,6 +1359,8 @@ def batch_action_route(
     account: AccountDTO | None = Depends(current_account),
     session=Depends(db),
     store=Depends(blob_store),
+    transport=Depends(ai_llm_transport),
+    resolve=Depends(ai_llm_resolve),
 ):
     """批量操作——两种选区（「两处已定」第 2 条）：
 
@@ -1194,6 +1430,17 @@ def batch_action_route(
             result = bulk_soft_delete(session, account_id=account.id, library_id=library_id, work_ids=work_ids)
         elif action == "restore":
             result = bulk_restore(session, account_id=account.id, library_id=library_id, work_ids=work_ids)
+        elif action == "ai_assess":
+            connection_id = _resolve_default_ai_connection_id(session, account.id)
+            if connection_id is None:
+                return _back_to_list_with_error(
+                    slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page,
+                    error=_NO_AI_PROFILE_ERROR,
+                )
+            result = bulk_assess_works(
+                session, account_id=account.id, library_id=library_id, work_ids=work_ids,
+                connection_id=connection_id, transport=transport, resolve=resolve,
+            )
         else:  # "purge"
             if not confirm_purge:
                 return _back_to_list_with_error(

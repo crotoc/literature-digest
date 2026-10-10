@@ -20,6 +20,8 @@ import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.shell.deps import ai_llm_resolve as ai_llm_resolve_dependency
+from app.shell.deps import ai_llm_transport as ai_llm_transport_dependency
 from app.shell.deps import blob_store as blob_store_dependency
 from app.shell.deps import db as db_dependency
 from app.shell.deps import log_file as log_file_dependency
@@ -42,6 +44,16 @@ _DEFAULT_METADATA_LOOKUP_RESOLVE_IP = "93.184.216.34"
 
 def _default_metadata_lookup_resolve(host: str) -> list[str]:
     return [_DEFAULT_METADATA_LOOKUP_RESOLVE_IP]
+
+
+# 同一条规则换给 AI 相关路由（library 页的标签分组/重复提案 + AI 点评）：
+# 生产默认值会真的发网络请求打配置好的 LLM provider，测试不能用。
+_DEFAULT_AI_LLM_TRANSPORT = httpx.MockTransport(lambda request: httpx.Response(503))
+_DEFAULT_AI_LLM_RESOLVE_IP = "93.184.216.34"
+
+
+def _default_ai_llm_resolve(host: str) -> list[str]:
+    return [_DEFAULT_AI_LLM_RESOLVE_IP]
 
 
 @contextmanager
@@ -98,6 +110,8 @@ def test_client(app: FastAPI) -> Iterator[TestClient]:
         app.dependency_overrides[metadata_lookup_resolve_dependency] = (
             lambda: _default_metadata_lookup_resolve
         )
+        app.dependency_overrides[ai_llm_transport_dependency] = lambda: _DEFAULT_AI_LLM_TRANSPORT
+        app.dependency_overrides[ai_llm_resolve_dependency] = lambda: _default_ai_llm_resolve
         try:
             with TestClient(app) as client:
                 yield client
@@ -107,3 +121,5 @@ def test_client(app: FastAPI) -> Iterator[TestClient]:
             app.dependency_overrides.pop(log_file_dependency, None)
             app.dependency_overrides.pop(metadata_lookup_transport_dependency, None)
             app.dependency_overrides.pop(metadata_lookup_resolve_dependency, None)
+            app.dependency_overrides.pop(ai_llm_transport_dependency, None)
+            app.dependency_overrides.pop(ai_llm_resolve_dependency, None)

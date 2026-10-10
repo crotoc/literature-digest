@@ -1,9 +1,11 @@
 import io
+import json
 import re
 import zipfile
 
 import httpx
 
+from app.shell.deps import ai_llm_transport as ai_llm_transport_dependency
 from app.shell.deps import metadata_lookup_transport as metadata_lookup_transport_dependency
 
 PASSWORD = "correct-horse-battery-staple"
@@ -1938,3 +1940,280 @@ def test_move_tag_requires_login(client):
     response = _move_tag_post(client, library_url, tag_id, "up")
 
     assert str(response.url).endswith("/login")
+
+
+# ── 标签合并 / AI 分组提案 / AI 点评 ─────────────────────────────────────
+
+
+def _create_ai_profile(
+    client, *, name="ai1", provider="openai_compat", model="gpt-4o-mini", api_key="sk-test"
+):
+    return client.post(
+        "/settings/ai-profiles/create",
+        data={"provider": provider, "name": name, "model": model, "api_key": api_key, "base_url": ""},
+    )
+
+
+def _openai_transport(payload: dict):
+    content = json.dumps(payload)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    return httpx.MockTransport(handler)
+
+
+def test_merge_tags_combines_two_into_one(client):
+    _register(client, username="merge1", email="merge1@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    tag_a = _add_tag(client, library_url, work_id, "merge-a")
+    tag_b = _add_tag(client, library_url, work_id, "merge-b")
+
+    response = client.post(
+        f"{library_url}tags/merge",
+        data={
+            "tag_ids": [str(tag_a), str(tag_b)], "target_name": "merged-tag",
+            "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "merged-tag" in response.text
+    assert f"works/{work_id}/tags/{tag_a}/remove" not in response.text
+    assert f"works/{work_id}/tags/{tag_b}/remove" not in response.text
+
+
+def test_merge_tags_requires_at_least_two_tags(client):
+    _register(client, username="merge2", email="merge2@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    tag_a = _add_tag(client, library_url, work_id, "merge-solo")
+
+    response = client.post(
+        f"{library_url}tags/merge",
+        data={
+            "tag_ids": [str(tag_a)], "target_name": "whatever",
+            "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "至少需要选 2 个" in response.text
+
+
+def test_merge_tags_rejects_tag_id_from_another_library(client):
+    _register(client, username="merge3", email="merge3@example.org")
+    merge3_work_id = _import_sample(client)
+    merge3_lib_response = client.get("/library")
+    merge3_library_url = str(merge3_lib_response.url).replace("http://testserver", "")
+    other_tag_a = _add_tag(client, merge3_library_url, merge3_work_id, "merge3-a")
+    other_tag_b = _add_tag(client, merge3_library_url, merge3_work_id, "merge3-b")
+    client.post("/logout")
+
+    _register(client, username="merge4", email="merge4@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{library_url}tags/merge",
+        data={
+            "tag_ids": [str(other_tag_a), str(other_tag_b)], "target_name": "x",
+            "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "不属于这个库" in response.text
+
+
+def test_merge_tags_requires_login(client):
+    _register(client, username="merge5", email="merge5@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    tag_a = _add_tag(client, library_url, work_id, "merge5-a")
+    tag_b = _add_tag(client, library_url, work_id, "merge5-b")
+    client.post("/logout")
+
+    response = client.post(
+        f"{library_url}tags/merge",
+        data={"tag_ids": [str(tag_a), str(tag_b)], "target_name": "x", "view": "all"},
+    )
+
+    assert str(response.url).endswith("/login")
+
+
+def test_propose_groups_without_ai_profile_shows_error(client):
+    _register(client, username="prop1", email="prop1@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{library_url}tags/propose-groups",
+        data={"view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    assert response.status_code == 200
+    assert "还没有配置可用的 AI 模型连接" in response.text
+
+
+def test_propose_groups_shows_proposed_cluster(client):
+    _register(client, username="prop2", email="prop2@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    tag_a = _add_tag(client, library_url, work_id, "prop-a")
+    tag_b = _add_tag(client, library_url, work_id, "prop-b")
+    _create_ai_profile(client)
+
+    client.app.dependency_overrides[ai_llm_transport_dependency] = lambda: _openai_transport(
+        {"clusters": [{"name": "grouped-tag", "tag_ids": [tag_a, tag_b]}]}
+    )
+
+    response = client.post(
+        f"{library_url}tags/propose-groups",
+        data={"view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    assert response.status_code == 200
+    assert "AI 分组提案" in response.text
+    assert "grouped-tag" in response.text
+    assert "prop-a" in response.text
+    assert "prop-b" in response.text
+
+
+def test_propose_duplicates_shows_proposed_cluster(client):
+    _register(client, username="prop3", email="prop3@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    tag_a = _add_tag(client, library_url, work_id, "dup-a")
+    tag_b = _add_tag(client, library_url, work_id, "dup-b")
+    _create_ai_profile(client)
+
+    client.app.dependency_overrides[ai_llm_transport_dependency] = lambda: _openai_transport(
+        {"clusters": [{"name": "dup-a", "tag_ids": [tag_a, tag_b]}]}
+    )
+
+    response = client.post(
+        f"{library_url}tags/propose-duplicates",
+        data={"view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    assert response.status_code == 200
+    assert "AI 重复标签" in response.text
+
+
+def test_propose_groups_requires_login(client):
+    _register(client, username="prop4", email="prop4@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    response = client.post(f"{library_url}tags/propose-groups", data={"view": "all"})
+
+    assert str(response.url).endswith("/login")
+
+
+def test_ai_assess_work_records_summary_and_applies_tags(client):
+    _register(client, username="assess1", email="assess1@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    _create_ai_profile(client)
+
+    client.app.dependency_overrides[ai_llm_transport_dependency] = lambda: _openai_transport(
+        {"summary": "测试点评。", "relevance": 0.7, "novelty": 0.4, "tags": ["topic-x"]}
+    )
+
+    response = client.post(
+        f"{library_url}works/{work_id}/ai-assess",
+        data={"view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    assert response.status_code == 200
+    assert "测试点评。" in response.text
+    assert "topic-x" in response.text
+
+
+def test_ai_assess_work_without_ai_profile_shows_error(client):
+    _register(client, username="assess2", email="assess2@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{library_url}works/{work_id}/ai-assess",
+        data={"view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    assert response.status_code == 200
+    assert "还没有配置可用的 AI 模型连接" in response.text
+
+
+def test_ai_assess_work_rejects_work_id_from_another_library(client):
+    _register(client, username="assess3", email="assess3@example.org")
+    assess3_work_id = _import_sample(client)
+    client.post("/logout")
+
+    _register(client, username="assess4", email="assess4@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    _create_ai_profile(client)
+
+    client.app.dependency_overrides[ai_llm_transport_dependency] = lambda: _openai_transport(
+        {"summary": "x", "relevance": 0.1, "novelty": 0.1, "tags": []}
+    )
+
+    response = client.post(
+        f"{library_url}works/{assess3_work_id}/ai-assess",
+        data={"view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    assert response.status_code == 200
+    assert "不属于这个库" in response.text
+
+
+def test_ai_assess_work_requires_login(client):
+    _register(client, username="assess5", email="assess5@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    response = client.post(f"{library_url}works/{work_id}/ai-assess", data={"view": "all"})
+
+    assert str(response.url).endswith("/login")
+
+
+def test_batch_ai_assess_assesses_all_selected_works(client):
+    _register(client, username="batchai1", email="batchai1@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    work_a = _import_with_title(client, title="Batch AI One", year=2021)
+    work_b = _import_with_title(client, title="Batch AI Two", year=2022)
+    _create_ai_profile(client)
+
+    client.app.dependency_overrides[ai_llm_transport_dependency] = lambda: _openai_transport(
+        {"summary": "批量点评。", "relevance": 0.6, "novelty": 0.3, "tags": ["batch-topic"]}
+    )
+
+    response = _batch_post(client, library_url, action="ai_assess", work_ids=[work_a, work_b])
+
+    assert response.status_code == 200
+    assert response.text.count("批量点评。") == 2
+
+
+def test_batch_ai_assess_without_ai_profile_shows_error(client):
+    _register(client, username="batchai2", email="batchai2@example.org")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    work_id = _import_with_title(client, title="Batch AI NoProfile", year=2021)
+
+    response = _batch_post(client, library_url, action="ai_assess", work_ids=[work_id])
+
+    assert response.status_code == 200
+    assert "还没有配置可用的 AI 模型连接" in response.text

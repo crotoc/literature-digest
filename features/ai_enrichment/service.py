@@ -318,9 +318,16 @@ def _describe_work(work: WorkDTO) -> dict[str, str]:
     }
 
 
-def _resolve_ai_profile(db: Session, connection_id: int) -> tuple[str, str, str | None, str]:
+def resolve_ai_profile(db: Session, connection_id: int) -> tuple[str, str, str | None, str]:
     """返回 `(provider, model, base_url, api_key)`。批量点评只调一次，不是
-    每项重新解析——见模块 docstring 的「job 粒度」一节。"""
+    每项重新解析——见模块 docstring 的「job 粒度」一节。
+
+    公开导出（不加下划线）：`features/tag_grouping` 的 AI 分组/重复提案
+    不依赖 `domain/connections`（按设计故意不知道"连接"这个概念，只认
+    裸的 provider/model/api_key/base_url），所以 app/pages/library 需要
+    一个地方把"这个账号选的 ai_profile 连接"解析成这四个值，再转手喂给
+    `tag_grouping`——这个解析逻辑已经在这里写好了，没必要在页面层或
+    `tag_grouping` 里再写一遍（那会是第三处 `_secret_key()` 派生逻辑）。"""
     connection = get_connection(db, connection_id)
     _require_ai_profile(connection)
     provider = connection.config.get("provider")
@@ -355,7 +362,7 @@ def assess_work(
     """对单篇文献做一次 AI 点评：解析 `ai_profile` 连接 → 渲染 prompt →
     调 LLM → 把建议标签写进 `domain.tags` → 把结构化结果存成一条
     `domain.works` provenance → 记一次用量。"""
-    provider, model, base_url, api_key = _resolve_ai_profile(db, connection_id)
+    provider, model, base_url, api_key = resolve_ai_profile(db, connection_id)
     return _assess_with_profile(
         db,
         account_id=account_id,
@@ -454,7 +461,7 @@ def bulk_assess_works(
     """批量点评——"长流程批量"：每项一个子 job（不止失败项），和
     `features/organizing` 的"瞬时批量"（只有失败才建子行）不是同一个粒度
     规则，理由见模块 docstring。"""
-    provider, model, base_url, api_key = _resolve_ai_profile(db, connection_id)
+    provider, model, base_url, api_key = resolve_ai_profile(db, connection_id)
 
     total = len(work_ids)
     job = create_job(

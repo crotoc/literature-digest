@@ -76,6 +76,24 @@ def metadata_lookup_resolve():
     return default_resolve
 
 
+def ai_llm_transport():
+    """`features.tag_grouping` 的 `propose_ai_groups`/`propose_ai_duplicates`
+    和 `features.ai_enrichment` 的 `assess_work`/`bulk_assess_works` 共用的
+    `transport` 参数——生产路径返回 `None`（httpx 用默认传输，真的发网络
+    请求打配置好的 LLM provider）。和 `metadata_lookup_transport()` 同一条
+    安全规则：测试必须用 `dependency_overrides` 换成 `httpx.MockTransport`，
+    否则会真的发出网络请求打 OpenAI/Anthropic 兼容端点。
+    """
+    return None
+
+
+def ai_llm_resolve():
+    """配套 `ai_llm_transport()` 的 `resolve` 参数——生产路径用
+    `caps.httpfetch.default_resolve`（真实 DNS + SSRF 防护）。
+    """
+    return default_resolve
+
+
 def log_file() -> Path:
     """`features/logs_viewer` 操作的文件路径——走依赖注入而不是在页面层
     直接调 `settings().log_file`，理由和 `blob_store()` 一样：测试要能
