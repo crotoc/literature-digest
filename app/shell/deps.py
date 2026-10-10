@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from caps.authn import SESSION_PURPOSE, TokenExpired, TokenInvalid, unsign
 from caps.blobstore import BlobStore
+from caps.httpfetch import default_resolve
 from domain.accounts import AccountDTO, AccountNotFound, SessionNotFound, SessionRevoked
 from features.accounts_auth import resume_session
 from infra.config import settings
@@ -48,6 +49,31 @@ def blob_store() -> BlobStore:
 
         _blob_store = BlobStore(LocalFsBackend(root=settings().blob_root))
     return _blob_store
+
+
+def metadata_lookup_transport():
+    """`features.metadata_lookup.lookup_record`/`refresh_work_metadata` 的
+    `transport` 参数——生产路径返回 `None`（httpx 用默认传输，真的发网络
+    请求打 Crossref/PubMed）。和 `blob_store()`/`log_file()` 同一条安全
+    规则，只是这次的风险方向不同：不是"测试默认值会撞到真实部署资源"，
+    而是"不走依赖注入的话，测试会真的发出网络请求"（慢、不确定、可能被
+    外部 API 限流）。测试必须用 `client.app.dependency_overrides` 换成
+    `httpx.MockTransport`，`app/shell/testing.py` 的 `test_client()` 已经
+    给了一个不发真实请求的安全默认值，单条测试需要特定响应内容时再在
+    自己的测试函数里进一步覆盖（precedent 见
+    `app/pages/settings/tests/test_settings.py` 对 `log_file` 的同款用法）。
+    """
+    return None
+
+
+def metadata_lookup_resolve():
+    """配套 `metadata_lookup_transport()` 的 `resolve` 参数——生产路径用
+    `caps.httpfetch.default_resolve`（真实 DNS + SSRF 防护）。`caps/` 不在
+    `scripts/lint.sh` 规则 7 的可删目标里（目标只有 `adapters/*/*.py` 和
+    `features/*/`），所以这个 import 不需要像 `blob_store()` 里的
+    `LocalFsBackend` 那样延迟到函数体内，放模块顶层就行。
+    """
+    return default_resolve
 
 
 def log_file() -> Path:

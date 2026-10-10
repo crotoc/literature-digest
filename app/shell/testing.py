@@ -16,15 +16,32 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.shell.deps import blob_store as blob_store_dependency
 from app.shell.deps import db as db_dependency
 from app.shell.deps import log_file as log_file_dependency
+from app.shell.deps import metadata_lookup_resolve as metadata_lookup_resolve_dependency
+from app.shell.deps import metadata_lookup_transport as metadata_lookup_transport_dependency
 from caps.blobstore import BlobStore
 from caps.blobstore.testing import MemoryBackend
 from infra.db import new_memory_session_factory
+
+# 跟 blob_store/log_file 同一条规则：生产默认值会真的发网络请求打
+# Crossref/PubMed，测试不能用。这里给一个确定性失败的默认值（503），
+# 任何没有进一步覆盖这两个依赖的测试如果真的触发了 refresh-metadata
+# 路由，会拿到一个明确的"查不到"而不是真的发出请求；需要模拟"查到了"
+# 的测试在自己的测试函数里用 `client.app.dependency_overrides` 再换一次
+# （precedent 见 `app/pages/settings/tests/test_settings.py` 对 `log_file`
+# 的同款用法）。
+_DEFAULT_METADATA_LOOKUP_TRANSPORT = httpx.MockTransport(lambda request: httpx.Response(503))
+_DEFAULT_METADATA_LOOKUP_RESOLVE_IP = "93.184.216.34"
+
+
+def _default_metadata_lookup_resolve(host: str) -> list[str]:
+    return [_DEFAULT_METADATA_LOOKUP_RESOLVE_IP]
 
 
 @contextmanager
@@ -75,6 +92,12 @@ def test_client(app: FastAPI) -> Iterator[TestClient]:
         app.dependency_overrides[db_dependency] = _override_db
         app.dependency_overrides[blob_store_dependency] = _override_blob_store
         app.dependency_overrides[log_file_dependency] = _override_log_file
+        app.dependency_overrides[metadata_lookup_transport_dependency] = (
+            lambda: _DEFAULT_METADATA_LOOKUP_TRANSPORT
+        )
+        app.dependency_overrides[metadata_lookup_resolve_dependency] = (
+            lambda: _default_metadata_lookup_resolve
+        )
         try:
             with TestClient(app) as client:
                 yield client
@@ -82,3 +105,5 @@ def test_client(app: FastAPI) -> Iterator[TestClient]:
             app.dependency_overrides.pop(db_dependency, None)
             app.dependency_overrides.pop(blob_store_dependency, None)
             app.dependency_overrides.pop(log_file_dependency, None)
+            app.dependency_overrides.pop(metadata_lookup_transport_dependency, None)
+            app.dependency_overrides.pop(metadata_lookup_resolve_dependency, None)

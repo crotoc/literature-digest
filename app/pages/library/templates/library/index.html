@@ -174,6 +174,14 @@
             <p class="muted">{{ card.work.abstract }}</p>
           </details>
         {% endif %}
+        <form method="post" class="tag-add-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/refresh-metadata">
+          {{ hidden_state() }}
+          <select name="source">
+            <option value="crossref">Crossref</option>
+            <option value="pubmed">PubMed</option>
+          </select>
+          <button type="submit" class="btn">补全元数据</button>
+        </form>
         <details class="edit-details">
           <summary>编辑元数据</summary>
           <form method="post" class="edit-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/edit">

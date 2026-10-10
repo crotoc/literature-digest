@@ -99,6 +99,15 @@ RIS 导入的 `DO` 字段已经在 `features.importing` 落成 `doi` 标识符�
 `<details class="abstract-details">` 块，有摘要才渲染，纯展示不新增
 路由（`card.work.abstract` 已经在 `list_library_page` 的 DTO 里）。
 
+卡片新增"从 DOI/PubMed 补全元数据"（`refresh_metadata_route`）——
+`features.metadata_lookup` 是本次扒功能清单时漏掉的一个早就完整可用的
+feature，一直没有页面调它。这条路由把 `refresh_work_metadata` 的
+`transport`/`resolve` 两个 httpx 测试钩子参数经 `app/shell/deps.py` 的
+`metadata_lookup_transport`/`metadata_lookup_resolve` 依赖注入接进来——
+和 `blob_store()`/`log_file()` 同一条安全规则，不走依赖注入的话，页面层
+测试会真的发网络请求打 Crossref/PubMed（见 `deps.py` 里两个函数自己的
+docstring）。
+
 URL 用 `/l/<name-slug>-<id>/`——只认尾部数字 id，slug 前缀纯装饰，不校验
 是否和库名匹配（库改名后旧链接依然能打开，不需要重定向）。
 """
@@ -110,7 +119,13 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 
-from app.shell.deps import blob_store, current_account, db
+from app.shell.deps import (
+    blob_store,
+    current_account,
+    db,
+    metadata_lookup_resolve,
+    metadata_lookup_transport,
+)
 from app.shell.registry import NavItem
 from app.shell.templating import templates
 from caps.bibformats import SUPPORTED_FORMATS
@@ -141,6 +156,7 @@ from features.library_browse import (
     list_library_page,
     resolve_selection,
 )
+from features.metadata_lookup import SOURCES, MetadataLookupFailed, refresh_work_metadata
 from features.organizing import (
     bulk_add_tag,
     bulk_add_to_folder,
@@ -592,6 +608,83 @@ def edit_metadata_route(
         container_title=container_title.strip() or None,
         abstract=abstract.strip() or None,
     )
+    return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+@router.post("/l/{slug_and_id}/works/{work_id}/refresh-metadata")
+def refresh_metadata_route(
+    slug_and_id: str,
+    work_id: int,
+    source: str = Form(...),
+    view: str = Form(DEFAULT_VIEW),
+    sort_by: str = Form(DEFAULT_SORT_BY),
+    sort_dir: str = Form(DEFAULT_SORT_DIR),
+    page: int = Form(1),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+    transport=Depends(metadata_lookup_transport),
+    resolve=Depends(metadata_lookup_resolve),
+):
+    """计划「⑤ 单篇操作」之外的一块——`features.metadata_lookup` 在扒旧
+    功能清单时没有被单独列出来，但它早就完整可用（查 Crossref/PubMed 按
+    DOI/PMID 补全空字段），只是一直没有页面调它。接口和 `edit_metadata_route`
+    一样走表单 + 重定向回列表（规避清单 #5：一条路由，不拆 API+form）。
+
+    `source` 不在 `SOURCES` 里、或这条 work 既没有现成标识符又没有显式
+    传 identifier（这条路由不开放显式传——没有标识符就先用编辑表单把
+    DOI/PMID 填进去）时，`refresh_work_metadata` 抛 `ValueError`，原样转
+    成错误提示；外部请求失败（网络/5xx/限流）抛 `MetadataLookupFailed`，
+    `error.message` 转成提示。两种异常都不是 500——都是"这次没查到"而不是
+    页面本身坏了。
+
+    `refresh_work_metadata` 查到来源但没有可填的新字段、或该来源压根没有
+    这条记录时都是静默返回原样的 work（`LookupOutcome` 的"没查到"不算
+    异常），这里用 `after == before`（dataclass 值相等）判断，给一条"没有
+    查到可补充的新字段"的提示，不让用户以为是页面没反应。
+    """
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    library_id = _require_library(session, account.id, slug_and_id)
+    before = _require_work_in_library(session, library_id, work_id)
+
+    if source not in SOURCES:
+        return _back_to_list_with_error(
+            slug_and_id,
+            view=view,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            page=page,
+            error=f"不认识的来源：{source!r}",
+        )
+
+    try:
+        after = refresh_work_metadata(
+            session,
+            account_id=account.id,
+            library_id=library_id,
+            work_id=work_id,
+            source=source,
+            transport=transport,
+            resolve=resolve,
+        )
+    except ValueError as error:
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error=str(error)
+        )
+    except MetadataLookupFailed as error:
+        return _back_to_list_with_error(
+            slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page, error=error.message
+        )
+
+    if after == before:
+        return _back_to_list_with_error(
+            slug_and_id,
+            view=view,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            page=page,
+            error="没有查到可补充的新字段（来源无记录，或已有字段已经齐了）",
+        )
     return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
 
 

@@ -2,6 +2,10 @@ import io
 import re
 import zipfile
 
+import httpx
+
+from app.shell.deps import metadata_lookup_transport as metadata_lookup_transport_dependency
+
 PASSWORD = "correct-horse-battery-staple"
 
 SAMPLE_RIS = """TY  - JOUR
@@ -485,6 +489,161 @@ def test_work_card_hides_identifier_block_when_no_identifiers(client):
 
     response = client.get(library_url)
     assert "identifier-list" not in response.text
+
+
+def _crossref_transport(status_code: int = 200, *, container_title: str = "Nature"):
+    """和 `features/metadata_lookup/tests/test_service.py` 的
+    `_crossref_transport` 同一种构造方式——这里不复用那份（`features`之间/
+    `app` 对`features`测试互不 import，也没必要为一个 fixture 破例），
+    只取够这条页面路由测试用的最小字段子集。
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if status_code == 404:
+            return httpx.Response(404, content=b"not found")
+        if status_code != 200:
+            return httpx.Response(status_code, content=b"error")
+        message = {
+            "DOI": "10.1000/xyz123",
+            "type": "journal-article",
+            "title": ["Paper With Identifiers"],
+            "container-title": [container_title],
+            "abstract": "A freshly looked-up abstract.",
+        }
+        return httpx.Response(200, json={"status": "ok", "message": message})
+
+    return httpx.MockTransport(handler)
+
+
+def _import_with_doi(client, *, title: str, doi: str) -> int:
+    raw_text = f"TY  - JOUR\nTI  - {title}\nPY  - 2021///\nDO  - {doi}\nER  -\n"
+    r = client.post("/import", data={"format": "ris", "raw_text": raw_text})
+    match = re.search(r"work_id=(\d+)", r.text)
+    assert match is not None, r.text
+    return int(match.group(1))
+
+
+def test_refresh_metadata_fills_missing_fields_from_crossref(client):
+    _register(client, username="finn", email="finn@example.org")
+    work_id = _import_with_doi(client, title="Paper With Identifiers", doi="10.1000/xyz123")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    client.app.dependency_overrides[metadata_lookup_transport_dependency] = lambda: _crossref_transport()
+
+    response = client.post(
+        f"{library_url}works/{work_id}/refresh-metadata",
+        data={"source": "crossref", "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    assert response.status_code == 200  # 跟随了 303 回列表页
+    assert "Nature" in response.text
+    assert "A freshly looked-up abstract." in response.text
+
+
+def test_refresh_metadata_shows_error_when_lookup_fails(client):
+    _register(client, username="gail", email="gail@example.org")
+    work_id = _import_with_doi(client, title="X", doi="10.1000/fails")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    client.app.dependency_overrides[metadata_lookup_transport_dependency] = (
+        lambda: _crossref_transport(status_code=500)
+    )
+
+    response = client.post(
+        f"{library_url}works/{work_id}/refresh-metadata",
+        data={"source": "crossref", "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    assert response.status_code == 200
+    assert "alert-error" in response.text
+
+
+def test_refresh_metadata_shows_error_when_no_new_data_found(client):
+    _register(client, username="hugo", email="hugo@example.org")
+    work_id = _import_with_doi(client, title="Y", doi="10.1000/missing")
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    client.app.dependency_overrides[metadata_lookup_transport_dependency] = (
+        lambda: _crossref_transport(status_code=404)
+    )
+
+    response = client.post(
+        f"{library_url}works/{work_id}/refresh-metadata",
+        data={"source": "crossref", "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    assert response.status_code == 200
+    assert "没有查到可补充的新字段" in response.text
+
+
+def test_refresh_metadata_shows_error_when_work_has_no_identifier(client):
+    _register(client, username="iris", email="iris@example.org")
+    work_id = _import_sample(client)  # SAMPLE_RIS 没有 DO 字段
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{library_url}works/{work_id}/refresh-metadata",
+        data={"source": "crossref", "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    assert response.status_code == 200
+    assert "没有 doi 标识符" in response.text
+
+
+def test_refresh_metadata_rejects_unknown_source(client):
+    _register(client, username="jack", email="jack@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{library_url}works/{work_id}/refresh-metadata",
+        data={"source": "bing", "view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+    )
+
+    assert response.status_code == 200
+    assert "不认识的来源" in response.text
+
+
+def test_refresh_metadata_requires_login(client):
+    _register(client, username="kyle", email="kyle@example.org")
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    response = client.post(
+        f"{library_url}works/{work_id}/refresh-metadata", data={"source": "crossref", "view": "all"}
+    )
+
+    assert str(response.url).endswith("/login")
+
+
+def test_refresh_metadata_rejects_work_id_from_another_library(client):
+    _register(client, username="lena", email="lena@example.org")
+    lena_work_id = _import_sample(client)
+    lena_lib_response = client.get("/library")
+    lena_library_url = str(lena_lib_response.url).replace("http://testserver", "")
+    client.post("/logout")
+
+    _register(client, username="milo", email="milo@example.org")
+    milo_lib_response = client.get("/library")
+    milo_library_url = str(milo_lib_response.url).replace("http://testserver", "")
+
+    response = client.post(
+        f"{milo_library_url}works/{lena_work_id}/refresh-metadata",
+        data={"source": "crossref", "view": "all"},
+    )
+    assert response.status_code == 404
+
+    client.post("/logout")
+    client.post("/login", data={"username_or_email": "lena", "password": PASSWORD})
+    check_response = client.get(lena_library_url)
+    assert "A Sample Paper" in check_response.text
 
 
 def test_edit_metadata_rejects_non_numeric_year(client):
