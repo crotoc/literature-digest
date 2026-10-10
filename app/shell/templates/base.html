@@ -5,7 +5,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}literature-digest{% endblock %}</title>
+  <link rel="stylesheet" href="/static/tabler.min.css">
   <link rel="stylesheet" href="/static/app.css">
+  <script>
+    (function () {
+      /* 跟 app.css 里 --theme 变量切换约定一致：目前站内没有手动切换的开关，
+         只跟随系统偏好；这里额外把同一个判断结果同步到 Tabler 自己认的
+         data-bs-theme 属性上，这样 Tabler 原生的深色调色板跟我们的
+         prefers-color-scheme 判断保持同步，不需要自己重写一套变量表。 */
+      if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+        document.documentElement.setAttribute("data-bs-theme", "dark");
+      }
+    })();
+  </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/2.0.4/htmx.min.js" defer></script>
   {% block head_extra %}{% endblock %}
 </head>

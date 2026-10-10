@@ -9,29 +9,29 @@
 {% endmacro %}
 {% block content %}
   {% if error %}
-    <p class="alert alert-error">{{ error }}</p>
+    <div class="alert alert-danger">{{ error }}</div>
   {% endif %}
 
   <div class="library-toolbar">
-    <div class="tabs">
-      <a class="tab{% if view == 'all' %} is-active{% endif %}" href="?view=all">全部</a>
-      <a class="tab{% if view == 'trash' %} is-active{% endif %}" href="?view=trash">回收站</a>
+    <div class="btn-group" role="group">
+      <a class="btn btn-sm{% if view == 'all' %} active{% endif %}" href="?view=all">全部</a>
+      <a class="btn btn-sm{% if view == 'trash' %} active{% endif %}" href="?view=trash">回收站</a>
     </div>
     <form method="get" class="sort-form">
       <input type="hidden" name="view" value="{{ view }}">
-      <select name="sort_by" onchange="this.form.submit()">
+      <select name="sort_by" class="form-select form-select-sm" onchange="this.form.submit()">
         <option value="updated_at" {% if sort_by == "updated_at" %}selected{% endif %}>更新时间</option>
         <option value="created_at" {% if sort_by == "created_at" %}selected{% endif %}>加入时间</option>
         <option value="year" {% if sort_by == "year" %}selected{% endif %}>年份</option>
         <option value="title" {% if sort_by == "title" %}selected{% endif %}>标题</option>
       </select>
-      <select name="sort_dir" onchange="this.form.submit()">
+      <select name="sort_dir" class="form-select form-select-sm" onchange="this.form.submit()">
         <option value="desc" {% if sort_dir == "desc" %}selected{% endif %}>降序</option>
         <option value="asc" {% if sort_dir == "asc" %}selected{% endif %}>升序</option>
       </select>
     </form>
     <form method="get" action="/l/{{ slug_and_id }}/export" class="export-form">
-      <select name="format">
+      <select name="format" class="form-select form-select-sm">
         <option value="ris">RIS</option>
         <option value="bibtex">BibTeX</option>
         <option value="csljson">CSL-JSON</option>
@@ -39,11 +39,11 @@
       <label class="export-with-attachments">
         <input type="checkbox" name="with_attachments" value="true"> 含附件（打包成 ZIP）
       </label>
-      <button type="submit" class="btn">导出整个文库</button>
+      <button type="submit" class="btn btn-sm">导出整个文库</button>
     </form>
   </div>
 
-  <form method="get" class="library-filters">
+  <form method="get" class="library-filters card p-2 mb-3">
     <input type="hidden" name="view" value="{{ view }}">
     <input type="hidden" name="sort_by" value="{{ sort_by }}">
     <input type="hidden" name="sort_dir" value="{{ sort_dir }}">
@@ -77,16 +77,16 @@
     </fieldset>
     <label class="library-filter-folder">
       按文件夹筛选
-      <select name="folder_id">
+      <select name="folder_id" class="form-select form-select-sm">
         <option value="">全部文件夹</option>
         {% for folder in folders %}
           <option value="{{ folder.id }}" {% if folder.id == folder_id %}selected{% endif %}>{{ folder.name }}</option>
         {% endfor %}
       </select>
     </label>
-    <button type="submit" class="btn">筛选</button>
+    <button type="submit" class="btn btn-sm">筛选</button>
     {% if tag_ids or folder_id %}
-      <a class="btn" href="?view={{ view }}&amp;sort_by={{ sort_by }}&amp;sort_dir={{ sort_dir }}">清除筛选</a>
+      <a class="btn btn-sm" href="?view={{ view }}&amp;sort_by={{ sort_by }}&amp;sort_dir={{ sort_dir }}">清除筛选</a>
     {% endif %}
   </form>
 
@@ -97,7 +97,7 @@
   {% endif %}
 
   {% if library_page.items %}
-    <form id="batch-form" method="post" action="/l/{{ slug_and_id }}/batch" class="batch-bar">
+    <form id="batch-form" method="post" action="/l/{{ slug_and_id }}/batch" class="batch-bar card p-2 mb-3">
       {{ hidden_state() }}
       <input type="hidden" name="selection_mode" value="explicit" id="batch-selection-mode">
       {% for tid in tag_ids %}<input type="hidden" name="tag_ids" value="{{ tid }}">{% endfor %}
@@ -110,32 +110,32 @@
           全选所有筛选结果（共 {{ library_page.total }} 篇）
         </a>
       </span>
-      <select name="target_tag_id">
+      <select name="target_tag_id" class="form-select form-select-sm">
         <option value="">选标签……</option>
         {% for tag in all_tags %}
           <option value="{{ tag.id }}">{{ tag.name }}</option>
         {% endfor %}
       </select>
-      <button type="submit" name="action" value="add_tag" class="btn">批量打标签</button>
-      <button type="submit" name="action" value="remove_tag" class="btn">批量去标签</button>
-      <select name="target_folder_id">
+      <button type="submit" name="action" value="add_tag" class="btn btn-sm">批量打标签</button>
+      <button type="submit" name="action" value="remove_tag" class="btn btn-sm">批量去标签</button>
+      <select name="target_folder_id" class="form-select form-select-sm">
         <option value="">选文件夹……</option>
         {% for folder in folders %}
           <option value="{{ folder.id }}">{{ folder.name }}</option>
         {% endfor %}
       </select>
-      <button type="submit" name="action" value="add_folder" class="btn">批量加入文件夹</button>
-      <button type="submit" name="action" value="remove_folder" class="btn">批量移出文件夹</button>
+      <button type="submit" name="action" value="add_folder" class="btn btn-sm">批量加入文件夹</button>
+      <button type="submit" name="action" value="remove_folder" class="btn btn-sm">批量移出文件夹</button>
       {% if view == "trash" %}
-        <button type="submit" name="action" value="restore" class="btn">批量恢复</button>
+        <button type="submit" name="action" value="restore" class="btn btn-sm">批量恢复</button>
         <label class="batch-confirm-purge">
           <input type="checkbox" name="confirm_purge" value="true"> 确认彻底删除（不可撤销）
         </label>
-        <button type="submit" name="action" value="purge" class="btn">批量彻底删除</button>
+        <button type="submit" name="action" value="purge" class="btn btn-sm btn-outline-danger">批量彻底删除</button>
       {% else %}
-        <button type="submit" name="action" value="delete" class="btn">批量移入回收站</button>
+        <button type="submit" name="action" value="delete" class="btn btn-sm">批量移入回收站</button>
       {% endif %}
-      <select name="format">
+      <select name="format" class="form-select form-select-sm">
         <option value="ris">RIS</option>
         <option value="bibtex">BibTeX</option>
         <option value="csljson">CSL-JSON</option>
@@ -143,186 +143,194 @@
       <label class="export-with-attachments">
         <input type="checkbox" name="with_attachments" value="true"> 含附件
       </label>
-      <button type="submit" formaction="/l/{{ slug_and_id }}/export-selection" class="btn">导出选中/筛选结果</button>
+      <button type="submit" formaction="/l/{{ slug_and_id }}/export-selection" class="btn btn-sm">导出选中/筛选结果</button>
       <button type="submit" name="cite_format" value="keys"
-              formaction="/l/{{ slug_and_id }}/cite-selection" class="btn">复制 Citation Key</button>
+              formaction="/l/{{ slug_and_id }}/cite-selection" class="btn btn-sm">复制 Citation Key</button>
       <button type="submit" name="cite_format" value="latex"
-              formaction="/l/{{ slug_and_id }}/cite-selection" class="btn">复制 LaTeX \cite{}</button>
+              formaction="/l/{{ slug_and_id }}/cite-selection" class="btn btn-sm">复制 LaTeX \cite{}</button>
     </form>
   {% endif %}
 
-  <ul class="work-list">
-    {% for card in library_page.items %}
-      <li class="work-card card">
-        <input type="checkbox" class="work-select" name="work_ids" value="{{ card.work.id }}" form="batch-form">
-        <h3>{{ card.work.title or "（无标题）" }}</h3>
-        <p class="work-meta muted">
-          {% for author in card.work.authors %}{{ author.literal or ((author.family or "") ~ (" " ~ author.given if author.given else "")) }}{% if not loop.last %}; {% endif %}{% endfor %}
-          {% if card.work.year %} · {{ card.work.year }}{% endif %}
-          {% if card.work.container_title %} · {{ card.work.container_title }}{% endif %}
-        </p>
-        {% if card.identifiers %}
-          <p class="identifier-list muted">
-            {% for identifier in card.identifiers %}
-              <span class="identifier-chip">{{ identifier.scheme | upper }}: {{ identifier.value }}</span>
-            {% endfor %}
-          </p>
-        {% endif %}
-        {% if card.work.abstract %}
-          <details class="abstract-details">
-            <summary>摘要</summary>
-            <p class="muted">{{ card.work.abstract }}</p>
-          </details>
-        {% endif %}
-        <form method="post" class="tag-add-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/refresh-metadata">
-          {{ hidden_state() }}
-          <select name="source">
-            <option value="crossref">Crossref</option>
-            <option value="pubmed">PubMed</option>
-          </select>
-          <button type="submit" class="btn">补全元数据</button>
-        </form>
-        <details class="edit-details">
-          <summary>编辑元数据</summary>
-          <form method="post" class="edit-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/edit">
-            {{ hidden_state() }}
-            <label>标题
-              <input type="text" name="title" value="{{ card.work.title or '' }}">
-            </label>
-            <label>年份
-              <input type="text" name="year" value="{{ card.work.year or '' }}" inputmode="numeric">
-            </label>
-            <label>期刊/书名
-              <input type="text" name="container_title" value="{{ card.work.container_title or '' }}">
-            </label>
-            <label>摘要
-              <textarea name="abstract" rows="3">{{ card.work.abstract or "" }}</textarea>
-            </label>
-            <button type="submit" class="btn">保存元数据</button>
-          </form>
-        </details>
-        <p class="work-tags">
-          {% for tag in card.tags %}
-            <span class="tag-chip">
-              {{ tag.name }}
-              <form method="post" class="tag-remove-form"
-                    action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/tags/{{ tag.id }}/remove">
+  {% if library_page.items %}
+  <div class="card">
+    <ul class="work-list list-group list-group-flush">
+      {% for card in library_page.items %}
+        <li class="work-card list-group-item">
+          <div class="work-item-main">
+            <input type="checkbox" class="work-select form-check-input mt-1" name="work_ids" value="{{ card.work.id }}" form="batch-form">
+            <div class="work-item-body">
+              <h3 class="mb-1">{{ card.work.title or "（无标题）" }}</h3>
+              <p class="work-meta muted mb-1">
+                {% for author in card.work.authors %}{{ author.literal or ((author.family or "") ~ (" " ~ author.given if author.given else "")) }}{% if not loop.last %}; {% endif %}{% endfor %}
+                {% if card.work.year %} · {{ card.work.year }}{% endif %}
+                {% if card.work.container_title %} · {{ card.work.container_title }}{% endif %}
+              </p>
+              {% if card.identifiers %}
+                <p class="identifier-list muted">
+                  {% for identifier in card.identifiers %}
+                    <span class="identifier-chip">{{ identifier.scheme | upper }}: {{ identifier.value }}</span>
+                  {% endfor %}
+                </p>
+              {% endif %}
+              {% if card.work.abstract %}
+                <details class="abstract-details">
+                  <summary>摘要</summary>
+                  <p class="muted">{{ card.work.abstract }}</p>
+                </details>
+              {% endif %}
+              <form method="post" class="tag-add-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/refresh-metadata">
                 {{ hidden_state() }}
-                <button type="submit" aria-label="移除标签 {{ tag.name }}">×</button>
+                <select name="source" class="form-select form-select-sm">
+                  <option value="crossref">Crossref</option>
+                  <option value="pubmed">PubMed</option>
+                </select>
+                <button type="submit" class="btn btn-sm">补全元数据</button>
               </form>
-            </span>
-          {% endfor %}
-        </p>
-        <form method="post" class="tag-add-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/tags/add">
-          {{ hidden_state() }}
-          <input type="text" name="name" placeholder="新标签名" size="12">
-          <button type="submit" class="btn">打标签</button>
-        </form>
-        <p class="work-folders">
-          {% for folder in card.folders %}
-            <span class="tag-chip">
-              {{ folder.name }}
-              <form method="post" class="tag-remove-form"
-                    action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/folders/{{ folder.id }}/remove">
-                {{ hidden_state() }}
-                <button type="submit" aria-label="从文件夹 {{ folder.name }} 移出">×</button>
-              </form>
-            </span>
-          {% endfor %}
-        </p>
-        {% if folders %}
-          <form method="post" class="tag-add-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/folders/add">
-            {{ hidden_state() }}
-            <select name="folder_id">
-              <option value="">加入文件夹……</option>
-              {% for folder in folders %}
-                <option value="{{ folder.id }}">{{ folder.name }}</option>
-              {% endfor %}
-            </select>
-            <button type="submit" class="btn">加入</button>
-          </form>
-        {% endif %}
-        <details class="attachment-details">
-          <summary>附件（{{ card.attachments | length }}）</summary>
-          <ul class="attachment-list">
-            {% for attachment in card.attachments %}
-              <li class="attachment-row">
-                {% if attachment.role == "main" %}
-                  <span class="tag-chip" title="主附件">主</span>
-                {% endif %}
-                <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/{{ attachment.id }}/download">
-                  {{ attachment.filename }}
-                </a>
-                {% if attachment.content_type in viewable_content_types %}
-                  <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/{{ attachment.id }}/view"
-                     target="_blank">在线查看</a>
-                {% endif %}
-                <span class="muted">（{{ (attachment.size / 1024) | round(1) }} KB）</span>
-                {% if attachment.role != "main" %}
-                  <form method="post" class="attachment-set-main-form"
-                        action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/{{ attachment.id }}/set-main">
-                    {{ hidden_state() }}
-                    <button type="submit">设为主</button>
-                  </form>
-                {% endif %}
-                <form method="post" class="attachment-delete-form"
-                      action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/{{ attachment.id }}/delete">
+              <details class="edit-details">
+                <summary>编辑元数据</summary>
+                <form method="post" class="edit-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/edit">
                   {{ hidden_state() }}
-                  <button type="submit" aria-label="删除附件 {{ attachment.filename }}">×</button>
+                  <label class="form-label">标题
+                    <input type="text" class="form-control form-control-sm" name="title" value="{{ card.work.title or '' }}">
+                  </label>
+                  <label class="form-label">年份
+                    <input type="text" class="form-control form-control-sm" name="year" value="{{ card.work.year or '' }}" inputmode="numeric">
+                  </label>
+                  <label class="form-label">期刊/书名
+                    <input type="text" class="form-control form-control-sm" name="container_title" value="{{ card.work.container_title or '' }}">
+                  </label>
+                  <label class="form-label">摘要
+                    <textarea class="form-control form-control-sm" name="abstract" rows="3">{{ card.work.abstract or "" }}</textarea>
+                  </label>
+                  <button type="submit" class="btn btn-sm">保存元数据</button>
                 </form>
-              </li>
-            {% endfor %}
-          </ul>
-          <form method="post" class="attachment-upload-form" enctype="multipart/form-data"
-                action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/upload">
-            {{ hidden_state() }}
-            <input type="file" name="file" required>
-            <button type="submit" class="btn">上传附件</button>
-          </form>
-          <form method="post" class="attachment-upload-form" enctype="multipart/form-data"
-                action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/upload-batch"
-                onsubmit="__prepRelPaths(this); return true;">
-            {{ hidden_state() }}
-            <input type="file" name="files" webkitdirectory multiple required>
-            <button type="submit" class="btn">整目录上传</button>
-          </form>
-        </details>
-        {% if view == 'all' %}
-          {% set citation = citation_by_work_id.get(card.work.id) %}
-          {% if citation %}
-            <p class="citation-text muted">{{ citation }}</p>
-          {% endif %}
-          <p class="cite-links muted">
-            下载：
-            <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/cite?format=ris">RIS</a> ·
-            <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/cite?format=bibtex">BibTeX</a> ·
-            <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/cite?format=csljson">CSL-JSON</a>
-          </p>
-        {% endif %}
-        <details class="note-details"{% if card.note %} open{% endif %}>
-          <summary>笔记{% if card.note %}（已有）{% else %}（还没有）{% endif %}</summary>
-          <form method="post" class="note-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/note">
-            {{ hidden_state() }}
-            <textarea name="content" rows="3" placeholder="写点什么……清空并保存会删掉这条笔记">{{ card.note.content if card.note else "" }}</textarea>
-            <button type="submit" class="btn">保存笔记</button>
-          </form>
-        </details>
-        <form method="post" class="work-actions"
-              action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/{{ 'restore' if view == 'trash' else 'delete' }}">
-          {{ hidden_state() }}
-          <button type="submit" class="btn">{{ "恢复" if view == "trash" else "移入回收站" }}</button>
-        </form>
-      </li>
-    {% endfor %}
-  </ul>
+              </details>
+              <p class="work-tags">
+                {% for tag in card.tags %}
+                  <span class="badge bg-blue-lt">
+                    {{ tag.name }}
+                    <form method="post" class="tag-remove-form"
+                          action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/tags/{{ tag.id }}/remove">
+                      {{ hidden_state() }}
+                      <button type="submit" aria-label="移除标签 {{ tag.name }}">×</button>
+                    </form>
+                  </span>
+                {% endfor %}
+              </p>
+              <form method="post" class="tag-add-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/tags/add">
+                {{ hidden_state() }}
+                <input type="text" class="form-control form-control-sm" name="name" placeholder="新标签名" size="12">
+                <button type="submit" class="btn btn-sm">打标签</button>
+              </form>
+              <p class="work-folders">
+                {% for folder in card.folders %}
+                  <span class="badge bg-green-lt">
+                    {{ folder.name }}
+                    <form method="post" class="tag-remove-form"
+                          action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/folders/{{ folder.id }}/remove">
+                      {{ hidden_state() }}
+                      <button type="submit" aria-label="从文件夹 {{ folder.name }} 移出">×</button>
+                    </form>
+                  </span>
+                {% endfor %}
+              </p>
+              {% if folders %}
+                <form method="post" class="tag-add-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/folders/add">
+                  {{ hidden_state() }}
+                  <select name="folder_id" class="form-select form-select-sm">
+                    <option value="">加入文件夹……</option>
+                    {% for folder in folders %}
+                      <option value="{{ folder.id }}">{{ folder.name }}</option>
+                    {% endfor %}
+                  </select>
+                  <button type="submit" class="btn btn-sm">加入</button>
+                </form>
+              {% endif %}
+              <details class="attachment-details">
+                <summary>附件（{{ card.attachments | length }}）</summary>
+                <ul class="attachment-list list-group list-group-flush">
+                  {% for attachment in card.attachments %}
+                    <li class="attachment-row list-group-item">
+                      {% if attachment.role == "main" %}
+                        <span class="badge bg-yellow-lt" title="主附件">主</span>
+                      {% endif %}
+                      <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/{{ attachment.id }}/download">
+                        {{ attachment.filename }}
+                      </a>
+                      {% if attachment.content_type in viewable_content_types %}
+                        <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/{{ attachment.id }}/view"
+                           target="_blank">在线查看</a>
+                      {% endif %}
+                      <span class="muted">（{{ (attachment.size / 1024) | round(1) }} KB）</span>
+                      {% if attachment.role != "main" %}
+                        <form method="post" class="attachment-set-main-form"
+                              action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/{{ attachment.id }}/set-main">
+                          {{ hidden_state() }}
+                          <button type="submit">设为主</button>
+                        </form>
+                      {% endif %}
+                      <form method="post" class="attachment-delete-form"
+                            action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/{{ attachment.id }}/delete">
+                        {{ hidden_state() }}
+                        <button type="submit" aria-label="删除附件 {{ attachment.filename }}">×</button>
+                      </form>
+                    </li>
+                  {% endfor %}
+                </ul>
+                <form method="post" class="attachment-upload-form" enctype="multipart/form-data"
+                      action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/upload">
+                  {{ hidden_state() }}
+                  <input type="file" class="form-control form-control-sm" name="file" required>
+                  <button type="submit" class="btn btn-sm">上传附件</button>
+                </form>
+                <form method="post" class="attachment-upload-form" enctype="multipart/form-data"
+                      action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/attachments/upload-batch"
+                      onsubmit="__prepRelPaths(this); return true;">
+                  {{ hidden_state() }}
+                  <input type="file" class="form-control form-control-sm" name="files" webkitdirectory multiple required>
+                  <button type="submit" class="btn btn-sm">整目录上传</button>
+                </form>
+              </details>
+              {% if view == 'all' %}
+                {% set citation = citation_by_work_id.get(card.work.id) %}
+                {% if citation %}
+                  <p class="citation-text muted">{{ citation }}</p>
+                {% endif %}
+                <p class="cite-links muted">
+                  下载：
+                  <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/cite?format=ris">RIS</a> ·
+                  <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/cite?format=bibtex">BibTeX</a> ·
+                  <a href="/l/{{ slug_and_id }}/works/{{ card.work.id }}/cite?format=csljson">CSL-JSON</a>
+                </p>
+              {% endif %}
+              <details class="note-details"{% if card.note %} open{% endif %}>
+                <summary>笔记{% if card.note %}（已有）{% else %}（还没有）{% endif %}</summary>
+                <form method="post" class="note-form" action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/note">
+                  {{ hidden_state() }}
+                  <textarea class="form-control form-control-sm" name="content" rows="3" placeholder="写点什么……清空并保存会删掉这条笔记">{{ card.note.content if card.note else "" }}</textarea>
+                  <button type="submit" class="btn btn-sm">保存笔记</button>
+                </form>
+              </details>
+              <form method="post" class="work-actions mt-1"
+                    action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/{{ 'restore' if view == 'trash' else 'delete' }}">
+                {{ hidden_state() }}
+                <button type="submit" class="btn btn-sm">{{ "恢复" if view == "trash" else "移入回收站" }}</button>
+              </form>
+            </div>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 
-  <nav class="pagination">
+  <nav class="pagination justify-content-center mt-3">
     {% if page > 1 %}
-      <a href="?view={{ view }}&sort_by={{ sort_by }}&sort_dir={{ sort_dir }}&page={{ page - 1 }}">← 上一页</a>
+      <a class="page-link" href="?view={{ view }}&sort_by={{ sort_by }}&sort_dir={{ sort_dir }}&page={{ page - 1 }}">← 上一页</a>
     {% endif %}
-    <span class="muted">第 {{ page }} / {{ total_pages }} 页</span>
+    <span class="muted mx-2">第 {{ page }} / {{ total_pages }} 页</span>
     {% if page < total_pages %}
-      <a href="?view={{ view }}&sort_by={{ sort_by }}&sort_dir={{ sort_dir }}&page={{ page + 1 }}">下一页 →</a>
+      <a class="page-link" href="?view={{ view }}&sort_by={{ sort_by }}&sort_dir={{ sort_dir }}&page={{ page + 1 }}">下一页 →</a>
     {% endif %}
   </nav>
 {% endblock %}

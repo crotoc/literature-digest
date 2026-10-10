@@ -1,32 +1,36 @@
 {% extends "base.html" %}
 {% block title %}注册 · literature-digest{% endblock %}
 {% block content %}
-  <div class="card card-narrow">
-    <h1>注册</h1>
-    {% if not allow_self_signup %}
-      <p class="alert alert-error">本站未开放自助注册。</p>
-    {% else %}
-      {% if error %}<p class="alert alert-error">{{ error }}</p>{% endif %}
-      <form method="post" action="/register">
-        <label class="form-field">
-          <span>用户名（至少 3 位）</span>
-          <input type="text" name="username" value="{{ username or '' }}" required minlength="3" autofocus>
-        </label>
-        <label class="form-field">
-          <span>邮箱</span>
-          <input type="email" name="email" value="{{ email or '' }}" required>
-        </label>
-        <label class="form-field">
-          <span>密码（至少 12 位）</span>
-          <input type="password" name="password" required minlength="12">
-        </label>
-        <label class="form-field">
-          <span>确认密码</span>
-          <input type="password" name="confirm_password" required minlength="12">
-        </label>
-        <button type="submit" class="btn btn-primary">注册</button>
-      </form>
-    {% endif %}
-    <p class="form-footer">已经有账号？<a href="/login">登录</a></p>
+  <div class="card card-md card-narrow">
+    <div class="card-body">
+      <h2 class="card-title">注册</h2>
+      {% if not allow_self_signup %}
+        <div class="alert alert-danger">本站未开放自助注册。</div>
+      {% else %}
+        {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+        <form method="post" action="/register" autocomplete="off">
+          <div class="mb-3">
+            <label class="form-label">用户名（至少 3 位）</label>
+            <input type="text" class="form-control" name="username" value="{{ username or '' }}" required minlength="3" autofocus>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">邮箱</label>
+            <input type="email" class="form-control" name="email" value="{{ email or '' }}" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">密码（至少 12 位）</label>
+            <input type="password" class="form-control" name="password" required minlength="12">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">确认密码</label>
+            <input type="password" class="form-control" name="confirm_password" required minlength="12">
+          </div>
+          <div class="form-footer">
+            <button type="submit" class="btn btn-primary w-100">注册</button>
+          </div>
+        </form>
+      {% endif %}
+    </div>
   </div>
+  <p class="text-center text-secondary mt-3">已经有账号？<a href="/login">登录</a></p>
 {% endblock %}

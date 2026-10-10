@@ -1,6 +1,12 @@
-<nav class="nav">
-  <span class="nav-brand">literature-digest</span>
-  {% for item in nav_items %}
-    <a class="nav-link{% if item.key == active_nav %} is-active{% endif %}" href="{{ item.path }}">{{ item.label }}</a>
-  {% endfor %}
-</nav>
+<header class="navbar navbar-expand-md navbar-light d-print-none">
+  <div class="container-xl">
+    <span class="navbar-brand">literature-digest</span>
+    <div class="navbar-nav flex-row flex-fill">
+      {% for item in nav_items %}
+        <div class="nav-item">
+          <a class="nav-link{% if item.key == active_nav %} active{% endif %}" href="{{ item.path }}">{{ item.label }}</a>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</header>

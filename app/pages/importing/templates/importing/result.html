@@ -2,30 +2,34 @@
 {% block title %}导入结果 · literature-digest{% endblock %}
 {% block content %}
   <div class="card">
-    <h1>导入完成</h1>
-    <table class="counts-table">
-      <tr><td>共解析</td><td>{{ job.counts.total }}</td></tr>
-      <tr><td>新建</td><td>{{ job.counts.created }}</td></tr>
-      <tr><td>合并到已有记录</td><td>{{ job.counts.merged }}</td></tr>
-      <tr><td>标记疑似重复</td><td>{{ job.counts.flagged_duplicate }}</td></tr>
-      <tr><td>失败</td><td>{{ job.counts.failed }}</td></tr>
-    </table>
+    <div class="card-body">
+      <h1 class="card-title">导入完成</h1>
+      <table class="table table-sm counts-table">
+        <tbody>
+          <tr><td>共解析</td><td>{{ job.counts.total }}</td></tr>
+          <tr><td>新建</td><td>{{ job.counts.created }}</td></tr>
+          <tr><td>合并到已有记录</td><td>{{ job.counts.merged }}</td></tr>
+          <tr><td>标记疑似重复</td><td>{{ job.counts.flagged_duplicate }}</td></tr>
+          <tr><td>失败</td><td>{{ job.counts.failed }}</td></tr>
+        </tbody>
+      </table>
 
-    {% if outcomes %}
-      <h2>逐条结果</h2>
-      <ul class="outcome-list">
-        {% for outcome in outcomes %}
-          <li>
-            work_id={{ outcome.work_id if outcome.work_id is not none else "—" }}
-            · <span class="tag-chip">{{ outcome.status }}</span>
-            {% if outcome.reason %} · {{ outcome.reason }}{% endif %}
-          </li>
-        {% endfor %}
-      </ul>
-    {% endif %}
+      {% if outcomes %}
+        <h2 class="mt-4">逐条结果</h2>
+        <ul class="list-group list-group-flush">
+          {% for outcome in outcomes %}
+            <li class="list-group-item">
+              work_id={{ outcome.work_id if outcome.work_id is not none else "—" }}
+              · <span class="badge bg-blue-lt">{{ outcome.status }}</span>
+              {% if outcome.reason %} · {{ outcome.reason }}{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
 
-    <p class="form-footer">
-      <a href="/library">查看文献库</a> · <a href="/import">再导入一批</a>
-    </p>
+      <p class="mt-3 mb-0">
+        <a href="/library">查看文献库</a> · <a href="/import">再导入一批</a>
+      </p>
+    </div>
   </div>
 {% endblock %}

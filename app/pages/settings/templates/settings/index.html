@@ -1,134 +1,157 @@
 {% extends "base.html" %}
 {% block title %}设置 · literature-digest{% endblock %}
 {% block content %}
-  <h2>设置</h2>
+  <h2 class="mb-3">设置</h2>
 
   {% if error %}
-    <p class="alert alert-error">{{ error }}</p>
+    <div class="alert alert-danger">{{ error }}</div>
   {% endif %}
   {% if notice %}
-    <p class="alert alert-notice">{{ notice }}</p>
+    <div class="alert alert-info">{{ notice }}</div>
   {% endif %}
 
-  <h3>引用样式</h3>
-  <p class="muted">文献库页面上每张卡片下面的格式化引用串按这个样式渲染。</p>
-  <form method="post" action="/settings/citation-style" class="settings-form">
-    <select name="style">
-      {% for style in styles %}
-        <option value="{{ style }}" {% if style == current_style %}selected{% endif %}>{{ style }}</option>
-      {% endfor %}
-    </select>
-    <button type="submit" class="btn btn-primary">保存</button>
-  </form>
-
-  <h3>附件命名</h3>
-  <p class="muted">
-    上传附件时按这个方括号模板重命名（后缀保留原始文件名的后缀）；
-    留空则保留原始文件名。可用占位：<code>[firstauthor]</code>
-    <code>[year]</code> <code>[title]</code>，支持 <code>[title:20]</code>
-    这种截断写法。
-  </p>
-  <form method="post" action="/settings/attachment-naming" class="settings-form">
-    <input type="text" name="template" value="{{ current_naming_template }}"
-           placeholder="例如 [firstauthor]_[year]_[title:30]" size="40">
-    <button type="submit" class="btn btn-primary">保存</button>
-  </form>
-
-  <h3>数据源凭据</h3>
-  <p class="muted">Crossref / PubMed 元数据查询用的访问凭据。</p>
-
-  {% if not connections %}
-    <p class="muted">还没有配置任何数据源凭据。</p>
-  {% endif %}
-
-  <ul class="connection-list">
-    {% for connection in connections %}
-      <li class="connection-row card">
-        <p>
-          <strong>{{ connection.name }}</strong>
-          <span class="muted">（{{ connection.config.source }}）</span>
-          {% if connection.is_default %}<span class="tag-chip">默认</span>{% endif %}
-          {% if not connection.enabled %}<span class="tag-chip">已停用</span>{% endif %}
-        </p>
-        {% if connection.last_checked_at %}
-          <p class="muted">
-            上次测试：{{ connection.last_checked_at }} ·
-            {% if connection.last_check_ok %}成功{% else %}失败：{{ connection.last_check_message }}{% endif %}
-          </p>
-        {% endif %}
-        <div class="connection-actions">
-          <form method="post" action="/settings/connections/{{ connection.id }}/toggle" class="connection-inline-form">
-            <button type="submit" class="btn">{{ "停用" if connection.enabled else "启用" }}</button>
-          </form>
-          {% if not connection.is_default %}
-            <form method="post" action="/settings/connections/{{ connection.id }}/set-default" class="connection-inline-form">
-              <button type="submit" class="btn">设为默认</button>
-            </form>
-          {% endif %}
-          <form method="post" action="/settings/connections/{{ connection.id }}/check" class="connection-inline-form">
-            <button type="submit" class="btn">测试连接</button>
-          </form>
-          {% if connection.config.source == "pubmed" %}
-            <form method="post" action="/settings/connections/{{ connection.id }}/rotate-key" class="connection-inline-form">
-              <input type="password" name="api_key" placeholder="新 API key" size="20" required>
-              <button type="submit" class="btn">更换 key</button>
-            </form>
-          {% endif %}
-          <form method="post" action="/settings/connections/{{ connection.id }}/delete" class="connection-inline-form">
-            <button type="submit" class="btn">删除</button>
-          </form>
-        </div>
-      </li>
-    {% endfor %}
-  </ul>
-
-  <h4>新建数据源凭据</h4>
-  <form method="post" action="/settings/connections/create" class="settings-form connection-create-form">
-    <select name="source">
-      {% for source in sources %}
-        <option value="{{ source }}">{{ source }}</option>
-      {% endfor %}
-    </select>
-    <input type="text" name="name" placeholder="连接名" required>
-    <input type="text" name="mailto" placeholder="mailto（仅 crossref）">
-    <input type="password" name="api_key" placeholder="API key（仅 pubmed）">
-    <button type="submit" class="btn btn-primary">新建</button>
-  </form>
-
-  <h3>日志</h3>
-  <p class="muted">应用运行日志（已脱敏），按级别/关键词筛选，最多显示最近 {{ log_entries|length }} 条。</p>
-
-  <form method="get" action="/settings" class="settings-form log-filter-form">
-    <select name="log_min_level">
-      <option value="" {% if not log_min_level %}selected{% endif %}>全部级别</option>
-      {% for level in log_levels %}
-        <option value="{{ level }}" {% if level == log_min_level %}selected{% endif %}>{{ level }}</option>
-      {% endfor %}
-    </select>
-    <input type="text" name="log_search" value="{{ log_search }}" placeholder="按消息内容搜索">
-    <button type="submit" class="btn">筛选</button>
-  </form>
-
-  <div class="log-actions">
-    <a class="btn" href="/settings/logs/export?log_min_level={{ log_min_level|urlencode }}&log_search={{ log_search|urlencode }}">导出</a>
-    <form method="post" action="/settings/logs/clear" class="log-inline-form">
-      <button type="submit" class="btn">清空日志</button>
-    </form>
+  <div class="card mb-3">
+    <div class="card-header"><strong>引用样式</strong></div>
+    <div class="card-body">
+      <p class="muted">文献库页面上每张卡片下面的格式化引用串按这个样式渲染。</p>
+      <form method="post" action="/settings/citation-style" class="settings-form d-flex gap-2 align-items-center flex-wrap">
+        <select name="style" class="form-select w-auto">
+          {% for style in styles %}
+            <option value="{{ style }}" {% if style == current_style %}selected{% endif %}>{{ style }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </form>
+    </div>
   </div>
 
-  {% if not log_entries %}
-    <p class="muted">没有匹配的日志条目。</p>
-  {% else %}
-    <ul class="log-entry-list">
-      {% for entry in log_entries %}
-        <li class="log-entry log-level-{{ entry.level|lower }}">
-          <span class="log-ts">{{ entry.ts }}</span>
-          <span class="tag-chip">{{ entry.level }}</span>
-          <span class="log-logger muted">{{ entry.logger }}</span>
-          <span class="log-msg">{{ entry.msg }}</span>
-          {% if entry.request_id %}<span class="muted">· {{ entry.request_id }}</span>{% endif %}
-        </li>
-      {% endfor %}
-    </ul>
-  {% endif %}
+  <div class="card mb-3">
+    <div class="card-header"><strong>附件命名</strong></div>
+    <div class="card-body">
+      <p class="muted">
+        上传附件时按这个方括号模板重命名（后缀保留原始文件名的后缀）；
+        留空则保留原始文件名。可用占位：<code>[firstauthor]</code>
+        <code>[year]</code> <code>[title]</code>，支持 <code>[title:20]</code>
+        这种截断写法。
+      </p>
+      <form method="post" action="/settings/attachment-naming" class="settings-form d-flex gap-2 align-items-center flex-wrap">
+        <input type="text" name="template" value="{{ current_naming_template }}" class="form-control w-auto"
+               placeholder="例如 [firstauthor]_[year]_[title:30]" size="40">
+        <button type="submit" class="btn btn-primary">保存</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-header"><strong>数据源凭据</strong></div>
+    <div class="card-body">
+      <p class="muted mb-0">Crossref / PubMed 元数据查询用的访问凭据。</p>
+      {% if not connections %}
+        <p class="muted mb-0">还没有配置任何数据源凭据。</p>
+      {% endif %}
+    </div>
+    {% if connections %}
+      <ul class="connection-list list-group list-group-flush">
+        {% for connection in connections %}
+          <li class="connection-row list-group-item">
+            <p class="mb-1">
+              <strong>{{ connection.name }}</strong>
+              <span class="muted">（{{ connection.config.source }}）</span>
+              {% if connection.is_default %}<span class="badge bg-blue-lt">默认</span>{% endif %}
+              {% if not connection.enabled %}<span class="badge bg-secondary-lt">已停用</span>{% endif %}
+            </p>
+            {% if connection.last_checked_at %}
+              <p class="muted mb-1">
+                上次测试：{{ connection.last_checked_at }} ·
+                {% if connection.last_check_ok %}成功{% else %}失败：{{ connection.last_check_message }}{% endif %}
+              </p>
+            {% endif %}
+            <div class="connection-actions">
+              <form method="post" action="/settings/connections/{{ connection.id }}/toggle" class="connection-inline-form">
+                <button type="submit" class="btn btn-sm">{{ "停用" if connection.enabled else "启用" }}</button>
+              </form>
+              {% if not connection.is_default %}
+                <form method="post" action="/settings/connections/{{ connection.id }}/set-default" class="connection-inline-form">
+                  <button type="submit" class="btn btn-sm">设为默认</button>
+                </form>
+              {% endif %}
+              <form method="post" action="/settings/connections/{{ connection.id }}/check" class="connection-inline-form">
+                <button type="submit" class="btn btn-sm">测试连接</button>
+              </form>
+              {% if connection.config.source == "pubmed" %}
+                <form method="post" action="/settings/connections/{{ connection.id }}/rotate-key" class="connection-inline-form">
+                  <input type="password" name="api_key" placeholder="新 API key" size="20" required class="form-control form-control-sm">
+                  <button type="submit" class="btn btn-sm">更换 key</button>
+                </form>
+              {% endif %}
+              <form method="post" action="/settings/connections/{{ connection.id }}/delete" class="connection-inline-form">
+                <button type="submit" class="btn btn-sm btn-outline-danger">删除</button>
+              </form>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    <div class="card-body">
+      <h4>新建数据源凭据</h4>
+      <form method="post" action="/settings/connections/create" class="settings-form connection-create-form">
+        <select name="source" class="form-select w-auto">
+          {% for source in sources %}
+            <option value="{{ source }}">{{ source }}</option>
+          {% endfor %}
+        </select>
+        <input type="text" name="name" placeholder="连接名" required class="form-control w-auto">
+        <input type="text" name="mailto" placeholder="mailto（仅 crossref）" class="form-control w-auto">
+        <input type="password" name="api_key" placeholder="API key（仅 pubmed）" class="form-control w-auto">
+        <button type="submit" class="btn btn-primary">新建</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><strong>日志</strong></div>
+    <div class="card-body">
+      <p class="muted">应用运行日志（已脱敏），按级别/关键词筛选，最多显示最近 {{ log_entries|length }} 条。</p>
+
+      <form method="get" action="/settings" class="settings-form log-filter-form">
+        <select name="log_min_level" class="form-select w-auto">
+          <option value="" {% if not log_min_level %}selected{% endif %}>全部级别</option>
+          {% for level in log_levels %}
+            <option value="{{ level }}" {% if level == log_min_level %}selected{% endif %}>{{ level }}</option>
+          {% endfor %}
+        </select>
+        <input type="text" name="log_search" value="{{ log_search }}" placeholder="按消息内容搜索" class="form-control w-auto">
+        <button type="submit" class="btn">筛选</button>
+      </form>
+
+      <div class="log-actions">
+        <a class="btn" href="/settings/logs/export?log_min_level={{ log_min_level|urlencode }}&log_search={{ log_search|urlencode }}">导出</a>
+        <form method="post" action="/settings/logs/clear" class="log-inline-form">
+          <button type="submit" class="btn btn-outline-danger">清空日志</button>
+        </form>
+      </div>
+    </div>
+
+    {% if not log_entries %}
+      <div class="card-body">
+        <p class="muted mb-0">没有匹配的日志条目。</p>
+      </div>
+    {% else %}
+      <div class="table-responsive log-entry-list">
+        <table class="table table-vcenter card-table">
+          <tbody>
+            {% for entry in log_entries %}
+              <tr class="log-level-{{ entry.level|lower }}">
+                <td class="log-ts text-nowrap muted">{{ entry.ts }}</td>
+                <td class="text-nowrap"><span class="badge log-level-badge">{{ entry.level }}</span></td>
+                <td class="log-logger muted text-nowrap">{{ entry.logger }}</td>
+                <td class="log-msg">{{ entry.msg }}</td>
+                <td class="muted text-nowrap">{% if entry.request_id %}{{ entry.request_id }}{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
 {% endblock %}

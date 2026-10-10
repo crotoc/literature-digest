@@ -557,7 +557,7 @@ def test_refresh_metadata_shows_error_when_lookup_fails(client):
     )
 
     assert response.status_code == 200
-    assert "alert-error" in response.text
+    assert "alert-danger" in response.text
 
 
 def test_refresh_metadata_shows_error_when_no_new_data_found(client):
