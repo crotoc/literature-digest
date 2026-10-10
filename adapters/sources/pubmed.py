@@ -22,6 +22,7 @@ from caps.httpfetch import HttpFetchError, RateLimiter, default_resolve, fetch
 from caps.probe import ProbeResult, fail, ok
 
 BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+_ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 
 # "测连接"用的探测 PMID：选一条确定稳定存在的老记录，只是为了验证能不能
 # 查通，不关心查到的具体内容。
@@ -88,6 +89,97 @@ def lookup_by_pmid(
         return None
 
     return _record_from_summary(summary)
+
+
+def search(
+    term: str,
+    *,
+    api_key: str | None = None,
+    mindate: str | None = None,
+    maxdate: str | None = None,
+    retmax: int = 20,
+    rate_limiter: RateLimiter | None = None,
+    transport=None,
+    resolve=default_resolve,
+) -> list[tuple[str, Record]]:
+    """按关键词搜索（`features/discovery` 用，不是 `features/metadata_lookup`
+    的单条查找）。分两步：`esearch.fcgi` 按 `term` 查出匹配的 PMID 列表，
+    再用 `esummary.fcgi` 批量查这批 PMID 的摘要（一次请求、逗号拼接 id，
+    不是逐个调 `lookup_by_pmid`——避免对一次搜索发出 N+1 次请求）。返回
+    `(pmid, Record)` 的列表。
+
+    `mindate`/`maxdate` 要求 PubMed 的日期格式 `"YYYY/MM/DD"`，对应
+    `datetype=pdat`（按发表日期筛，不是按收录日期）——这两个参数的计算
+    （`lookback_days` 怎么换算成具体日期）是调用方的职责。
+
+    固定只取 `esearch` 第一页最多 `retmax` 条，不翻页，理由同
+    `adapters.sources.crossref.search` 的同名参数说明。
+    """
+    params = {"db": "pubmed", "term": term, "retmode": "json", "retmax": str(retmax)}
+    if mindate or maxdate:
+        params["datetype"] = "pdat"
+    if mindate:
+        params["mindate"] = mindate
+    if maxdate:
+        params["maxdate"] = maxdate
+    if api_key:
+        params["api_key"] = api_key
+    try:
+        result = fetch(
+            _ESEARCH_URL, params=params, rate_limiter=rate_limiter, transport=transport, resolve=resolve
+        )
+    except HttpFetchError as exc:
+        raise PubMedError(f"搜索 PubMed 失败：{term}") from exc
+
+    if result.status_code >= 400:
+        raise PubMedError(f"PubMed 返回 {result.status_code}：{term}")
+
+    payload = json.loads(result.content)
+    esearch_result = payload.get("esearchresult")
+    if not isinstance(esearch_result, dict):
+        raise PubMedError(f"PubMed esearch 响应里没有 esearchresult 字段：{term}")
+
+    pmids = esearch_result.get("idlist") or []
+    if not pmids:
+        return []
+    return _fetch_summaries(
+        pmids, api_key=api_key, rate_limiter=rate_limiter, transport=transport, resolve=resolve
+    )
+
+
+def _fetch_summaries(
+    pmids: list[str],
+    *,
+    api_key: str | None,
+    rate_limiter: RateLimiter | None,
+    transport,
+    resolve,
+) -> list[tuple[str, Record]]:
+    params = {"db": "pubmed", "id": ",".join(pmids), "retmode": "json"}
+    if api_key:
+        params["api_key"] = api_key
+    try:
+        result = fetch(
+            BASE_URL, params=params, rate_limiter=rate_limiter, transport=transport, resolve=resolve
+        )
+    except HttpFetchError as exc:
+        raise PubMedError(f"批量查询 PubMed 摘要失败：{pmids}") from exc
+
+    if result.status_code >= 400:
+        raise PubMedError(f"PubMed 返回 {result.status_code}")
+
+    payload = json.loads(result.content)
+    outer_result = payload.get("result")
+    if not isinstance(outer_result, dict):
+        raise PubMedError("PubMed esummary 响应里没有 result 字段")
+
+    results = []
+    for pmid in outer_result.get("uids") or []:
+        summary = outer_result.get(pmid)
+        if not isinstance(summary, dict) or "error" in summary:
+            continue
+        results.append((pmid, _record_from_summary(summary)))
+    return results
 
 
 def _record_from_summary(summary: dict) -> Record:

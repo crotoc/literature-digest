@@ -99,6 +99,62 @@ def lookup_by_doi(
     return _record_from_message(message)
 
 
+def search(
+    query: str,
+    *,
+    mailto: str | None = None,
+    from_pub_date: str | None = None,
+    rows: int = 20,
+    rate_limiter: RateLimiter | None = None,
+    transport=None,
+    resolve=default_resolve,
+) -> list[tuple[str, Record]]:
+    """按关键词搜索（`features/discovery` 用，不是 `features/metadata_lookup`
+    的单条查找）。返回 `(doi, Record)` 的列表，`doi` 是这条结果的
+    source_id——调用方拿它去 `domain.intents.create_candidate()`/
+    `is_seen()` 当跨轮去重的 key。
+
+    `query` 对应 Crossref 的 `query.bibliographic`（标题/摘要/作者的联合
+    全文检索，不是 Crossref 自己那套复杂的字段级查询 DSL——这个适配器不
+    暴露那套 DSL，`features/query_planner` 编译出来的查询就是一段自然
+    语言关键词）。`from_pub_date`（`"YYYY-MM-DD"`）对应 `filter=
+    from-pub-date:...`，用来实现"只看最近 N 天发表的"——日期本身的计算
+    （`lookback_days` 怎么换算成这个字符串）是调用方的职责，这个函数只
+    管原样拼进请求。
+
+    固定只取第一页最多 `rows` 条，不翻页——`features/discovery` 的
+    `candidate_limit` 本身就不大，一页足够，翻页的复杂度不值得在这里引入。
+    """
+    params = {"query.bibliographic": query, "rows": str(rows)}
+    if mailto:
+        params["mailto"] = mailto
+    if from_pub_date:
+        params["filter"] = f"from-pub-date:{from_pub_date}"
+    try:
+        result = fetch(
+            BASE_URL, params=params, rate_limiter=rate_limiter, transport=transport, resolve=resolve
+        )
+    except HttpFetchError as exc:
+        raise CrossrefError(f"搜索 Crossref 失败：{query}") from exc
+
+    if result.status_code >= 400:
+        raise CrossrefError(f"Crossref 返回 {result.status_code}：{query}")
+
+    payload = json.loads(result.content)
+    message = payload.get("message")
+    if not isinstance(message, dict):
+        raise CrossrefError(f"Crossref 响应里没有 message 字段：{query}")
+
+    items = message.get("items") or []
+    results = []
+    for item in items:
+        doi = item.get("DOI")
+        if not doi:
+            continue
+        results.append((doi, _record_from_message(item)))
+    return results
+
+
 def _record_from_message(message: dict) -> Record:
     titles = message.get("title") or []
     container_titles = message.get("container-title") or []

@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from adapters.sources.crossref import CrossrefError, check, lookup_by_doi
+from adapters.sources.crossref import CrossrefError, check, lookup_by_doi, search
 from caps.bibformats import Person
 
 # api.crossref.org 真实指向公网 IP，但单测不该依赖真实 DNS 查询——用一个固定
@@ -211,3 +211,65 @@ def test_check_fails_on_server_error():
     transport = _transport(500, b"internal error")
     result = check(None, transport=transport, resolve=_FAKE_RESOLVE)
     assert result.ok is False
+
+
+# ── search ───────────────────────────────────────────────────────────────
+
+
+def _search_payload(items: list[dict]) -> dict:
+    return {"status": "ok", "message": {"items": items, "total-results": len(items)}}
+
+
+def test_search_returns_doi_record_pairs():
+    transport = _transport(200, _search_payload([CROSSREF_MESSAGE]))
+    results = search("attention is all you need", transport=transport, resolve=_FAKE_RESOLVE)
+
+    assert len(results) == 1
+    doi, record = results[0]
+    assert doi == "10.1038/s41586-019-1234-5"
+    assert record.title == "Attention Is All You Need Revisited"
+
+
+def test_search_skips_items_without_doi():
+    item_without_doi = {k: v for k, v in CROSSREF_MESSAGE.items() if k != "DOI"}
+    transport = _transport(200, _search_payload([item_without_doi]))
+    results = search("query", transport=transport, resolve=_FAKE_RESOLVE)
+    assert results == []
+
+
+def test_search_empty_items():
+    transport = _transport(200, _search_payload([]))
+    results = search("query with no matches", transport=transport, resolve=_FAKE_RESOLVE)
+    assert results == []
+
+
+def test_search_raises_on_server_error():
+    transport = _transport(500, b"internal error")
+    with pytest.raises(CrossrefError):
+        search("query", transport=transport, resolve=_FAKE_RESOLVE)
+
+
+def test_search_missing_message_field_raises():
+    transport = _transport(200, {"status": "ok"})
+    with pytest.raises(CrossrefError):
+        search("query", transport=transport, resolve=_FAKE_RESOLVE)
+
+
+def test_search_sends_mailto_and_from_pub_date_params():
+    seen_params = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_params.update(dict(request.url.params))
+        return httpx.Response(200, json=_search_payload([]))
+
+    search(
+        "query",
+        mailto="researcher@example.org",
+        from_pub_date="2026-01-01",
+        rows=5,
+        transport=httpx.MockTransport(handler),
+        resolve=_FAKE_RESOLVE,
+    )
+    assert seen_params.get("mailto") == "researcher@example.org"
+    assert seen_params.get("filter") == "from-pub-date:2026-01-01"
+    assert seen_params.get("rows") == "5"
