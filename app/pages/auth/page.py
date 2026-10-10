@@ -1,6 +1,13 @@
-"""app/pages/auth：登录 / 注册 / 登出。
+"""app/pages/auth：登录 / 注册 / 登出 / 忘记密码。
 
 只调 features/accounts_auth 的 contract，不碰任何 ORM（lint 规则 5）。
+
+忘记密码只接了"入口显示不可用"这一半（见 `/forgot-password` 路由自己的
+注释和 `SMTP_CONFIGURED` 常量）——`features.accounts_auth` 的
+`request_password_reset`/`consume_password_reset` 两个函数本身已经完整
+可用，缺的是 v1 根本没有邮件发送能力（`adapters/delivery/mailer` 是 E4
+阶段才做），所以页面层这次只做"让用户知道这个功能存在、但现在打不开"，
+不建一条在 v1 永远走不通的提交表单/POST 处理器。
 """
 
 from __future__ import annotations
@@ -24,6 +31,14 @@ from infra.errors import AppError
 router = APIRouter()
 # "/" 由 app/pages/home 负责（未登录时它自己转 /login），本页不进常驻导航。
 nav = None
+
+SMTP_CONFIGURED = False
+"""v1 没有 adapters/delivery/mailer（计划里是 E4 阶段才做），infra/config.py
+现在也没有任何 SMTP 字段——所以这里先硬编码一个常量，而不是去读一个还不
+存在的配置项。等 E4 真的接上 mailer、infra/config.py 有了 smtp_* 字段，
+把这里改成从 settings() 读出来即可，/forgot-password 这个路由本身不需要
+跟着改签名（和 features.accounts_auth 的 request_password_reset 把
+smtp_configured 设计成参数是同一个理由）。"""
 
 
 def _redirect_if_authenticated(account: AccountDTO | None) -> RedirectResponse | None:
@@ -79,6 +94,28 @@ def login_submit(
     response = RedirectResponse("/", status_code=303)
     _set_session_cookie(response, result.cookie_token)
     return response
+
+
+# ── 忘记密码 ─────────────────────────────────────────────────────────────
+#
+# v1 范围的刻意裁剪：这里只做计划原话要求的那一半——"入口显示不可用,不要
+# 让用户点进去才看到异常"（features/accounts_auth/README.md 的说法）。
+# SMTP_CONFIGURED 在 v1 恒为 False，request_password_reset() 一定会在
+# 生成令牌之前就抛 PasswordResetUnavailable，所以不建一个"提交邮箱"的
+# POST 表单——那会是一条永远只能走到同一句"不可用"提示的死代码路径，不如
+# GET 页面直接把这句话显示出来。等 E4 真的接上 mailer，再把表单和 POST
+# 处理器一起加上（到时候 SMTP_CONFIGURED 也会变成从 settings() 读出来）。
+
+
+@router.get("/forgot-password", response_class=HTMLResponse)
+def forgot_password_form(request: Request, account: AccountDTO | None = Depends(current_account)):
+    if (redirect := _redirect_if_authenticated(account)) is not None:
+        return redirect
+    return templates.TemplateResponse(
+        request,
+        "auth/forgot_password.html",
+        {"active_nav": None, "smtp_configured": SMTP_CONFIGURED},
+    )
 
 
 # ── 注册 ─────────────────────────────────────────────────────────────────

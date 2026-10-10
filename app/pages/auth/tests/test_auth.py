@@ -23,6 +23,30 @@ def test_login_form_redirects_when_already_authenticated(client):
     response = client.get("/login")
 
     assert response.status_code == 200  # TestClient 默认跟随重定向
+
+
+def test_login_form_has_forgot_password_link(client):
+    response = client.get("/login")
+    assert 'href="/forgot-password"' in response.text
+
+
+# ── GET /forgot-password ────────────────────────────────────────────────
+
+
+def test_forgot_password_form_shows_unavailable_notice_when_smtp_not_configured(client):
+    response = client.get("/forgot-password")
+    assert response.status_code == 200
+    assert "当前不可用" in response.text
+    assert "<form" not in response.text  # v1 恒为不可用，不应该渲染一个永远提交不出结果的表单
+
+
+def test_forgot_password_form_redirects_when_already_authenticated(client):
+    _register(client)
+
+    response = client.get("/forgot-password")
+
+    assert response.status_code == 200  # TestClient 默认跟随重定向
+    assert str(response.url).endswith("/")
     assert str(response.url).endswith("/")
 
 
