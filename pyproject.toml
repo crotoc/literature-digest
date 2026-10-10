@@ -18,6 +18,7 @@ dependencies = [
     "pyyaml>=6.0",
     "pypdf>=5.1",
     "httpx>=0.28",
+    "apscheduler>=3.11",
 ]
 
 [project.optional-dependencies]
