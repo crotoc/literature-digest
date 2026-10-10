@@ -9,8 +9,9 @@ domain/folders 本身没有表 library_id 可以跳过的"系统文件夹"概念
 
 v1 范围的刻意裁剪：
   - 把文献加入/移出文件夹（`add_work_to_folder`/`remove_work_from_folder`）
-    不在本增量——这是文献库卡片上的操作，和"管理文件夹树本身"是两个不同
-    的 UI 入口，归 app/pages/library 的下一个增量。
+    不在本页——这是文献库卡片上的操作，和"管理文件夹树本身"是两个不同
+    的 UI 入口，已经在 app/pages/library（批量加入/移出 + 单篇卡片上的
+    加入/移出表单）落地，不属于这页。
   - 这页只管文件夹树的结构，不管每个文件夹里有哪些文献（那是
     library_browse 的"按文件夹筛选"，本来就该在文献库页面里，不是这里）。
   - 删除一个文件夹会级联删掉它的全部子文件夹（domain.folders.delete_folder
