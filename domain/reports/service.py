@@ -218,6 +218,33 @@ def get_report(db: Session, report_id: int) -> ReportDTO:
     return _report_dto(_get_report_row(db, report_id))
 
 
+def get_or_create_report(
+    db: Session,
+    *,
+    account_id: int,
+    intent_id: int,
+    discovery_run_id: int,
+    status: str,
+    candidate_count: int = 0,
+) -> ReportDTO:
+    """按 discovery run 取或创建报告。
+
+    一次发现运行只对应一份报告；重复触发后续标题筛选、AI 分析或投递时必须
+    复用同一份报告，才有稳定的条目和投递记录可供原地更新。跨 domain 的
+    `discovery_run_id` 真实性仍由调用者负责，本模块只负责自己的唯一性。"""
+    existing = db.scalar(select(Report).where(Report.discovery_run_id == discovery_run_id))
+    if existing is not None:
+        return _report_dto(existing)
+    return create_report(
+        db,
+        account_id=account_id,
+        intent_id=intent_id,
+        discovery_run_id=discovery_run_id,
+        status=status,
+        candidate_count=candidate_count,
+    )
+
+
 def list_reports(
     db: Session,
     *,

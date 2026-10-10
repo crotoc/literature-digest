@@ -29,6 +29,9 @@ def _utcnow() -> datetime:
 
 class Report(Base):
     __tablename__ = "reports"
+    __table_args__ = (
+        UniqueConstraint("discovery_run_id", name="uq_report_discovery_run"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     account_id: Mapped[int] = mapped_column(index=True)  # 跨 domain 引用，刻意不建 FK

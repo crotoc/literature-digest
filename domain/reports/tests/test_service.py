@@ -8,6 +8,7 @@ from domain.reports import (
     create_report_item,
     get_delivery,
     get_or_create_delivery,
+    get_or_create_report,
     get_report,
     get_report_item,
     list_deliveries,
@@ -52,6 +53,17 @@ def test_create_report_and_update_its_funnel_fields(db):
     assert (updated.candidate_count, updated.title_kept_count, updated.abstract_candidate_count) == (7, 4, 3)
 
 
+def test_get_or_create_report_is_idempotent_per_discovery_run(db):
+    first = get_or_create_report(
+        db, account_id=ACCOUNT, intent_id=10, discovery_run_id=20, status="success", candidate_count=3
+    )
+    repeated = get_or_create_report(
+        db, account_id=ACCOUNT, intent_id=99, discovery_run_id=20, status="failed", candidate_count=0
+    )
+    assert repeated.id == first.id
+    assert repeated.intent_id == 10
+
+
 def test_report_rejects_unknown_statuses_and_missing_id(db):
     with pytest.raises(ValueError):
         create_report(db, account_id=ACCOUNT, intent_id=1, discovery_run_id=1, status="running")
@@ -66,8 +78,8 @@ def test_report_rejects_unknown_statuses_and_missing_id(db):
 
 def test_list_reports_is_account_scoped_and_optionally_filters_intent(db):
     mine = _make_report(db, intent_id=101)
-    _make_report(db, intent_id=102)
-    _make_report(db, account_id=OTHER_ACCOUNT, intent_id=101)
+    _make_report(db, intent_id=102, discovery_run_id=21)
+    _make_report(db, account_id=OTHER_ACCOUNT, intent_id=101, discovery_run_id=22)
     assert [row.id for row in list_reports(db, account_id=ACCOUNT, intent_id=101)] == [mine.id]
     assert len(list_reports(db, account_id=ACCOUNT)) == 2
 
@@ -127,7 +139,7 @@ def test_report_item_rejects_unknown_statuses_and_missing_id(db):
 
 def test_delivery_is_idempotent_scoped_and_updates_message_ids(db):
     report = _make_report(db, intent_id=9)
-    other_report = _make_report(db, account_id=OTHER_ACCOUNT, intent_id=9)
+    other_report = _make_report(db, account_id=OTHER_ACCOUNT, intent_id=9, discovery_run_id=21)
     first = get_or_create_delivery(db, report_id=report.id, connection_id=44)
     repeated = get_or_create_delivery(db, report_id=report.id, connection_id=44)
     get_or_create_delivery(db, report_id=other_report.id, connection_id=44)
