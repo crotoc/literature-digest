@@ -1,15 +1,62 @@
 {% extends "base.html" %}
 {% block title %}首页 · literature-digest{% endblock %}
 {% block content %}
-  <div class="card">
+  {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+  {% endif %}
+
+  <div class="card mb-3">
     <div class="card-body">
       <h1 class="mb-2">欢迎，{{ account.username }}</h1>
-      <p class="muted">
-        研究动态仪表盘要等 intents / reports（E3 / E4 阶段）落地后才会出现在这里。
+      <p class="muted mb-0">
+        最近报告/按意图分组的推送要等 reports / delivery（E4 阶段）落地后才会出现在这里。
       </p>
       <form method="post" action="/logout">
         <button type="submit" class="btn">退出登录</button>
       </form>
     </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><strong>研究意图</strong></div>
+    <div class="card-body">
+      <p class="muted mb-0">去 <a href="/settings">设置页</a> 新建研究意图、编译检索式、配置定时调度。</p>
+      {% if not intents %}
+        <p class="muted mb-0">还没有配置任何研究意图。</p>
+      {% endif %}
+    </div>
+    {% if intents %}
+      <ul class="connection-list list-group list-group-flush">
+        {% for intent in intents %}
+          {% set latest_run = intent_latest_runs.get(intent.id) %}
+          <li class="connection-row list-group-item">
+            <p class="mb-1">
+              <strong>{{ intent.name }}</strong>
+              {% if not intent.enabled %}<span class="badge bg-secondary-lt">已停用</span>{% endif %}
+            </p>
+            {% if latest_run %}
+              <p class="muted mb-1">
+                最近一次运行：{{ latest_run.started_at }} ·
+                {% if latest_run.status == "succeeded" %}
+                  成功，新增候选 {{ latest_run.new_candidate_count }} 篇（共看 {{ latest_run.candidate_count }} 篇）
+                {% else %}
+                  失败：{{ latest_run.error }}
+                {% endif %}
+              </p>
+            {% else %}
+              <p class="muted mb-1">还没有运行过。</p>
+            {% endif %}
+            <div class="connection-actions">
+              <form method="post" action="/intents/{{ intent.id }}/toggle" class="connection-inline-form">
+                <button type="submit" class="btn btn-sm">{{ "停用" if intent.enabled else "启用" }}</button>
+              </form>
+              <form method="post" action="/intents/{{ intent.id }}/run-now" class="connection-inline-form">
+                <button type="submit" class="btn btn-sm btn-primary" {% if not intent.enabled %}disabled{% endif %}>立即运行</button>
+              </form>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
   </div>
 {% endblock %}

@@ -173,6 +173,105 @@
     </div>
   </div>
 
+  <div class="card mb-3">
+    <div class="card-header"><strong>研究意图</strong></div>
+    <div class="card-body">
+      <p class="muted mb-0">
+        描述一个长期关注的研究问题，AI 把它编译成检索式，定时去 Crossref /
+        PubMed 发现新文献（候选在首页查看）。
+      </p>
+      {% if not intents %}
+        <p class="muted mb-0">还没有配置任何研究意图。</p>
+      {% endif %}
+    </div>
+    {% if intents %}
+      <ul class="connection-list list-group list-group-flush">
+        {% for intent in intents %}
+          {% set latest_version = intent_latest_versions.get(intent.id) %}
+          {% set schedule = intent_schedules.get(intent.id) %}
+          <li class="connection-row list-group-item">
+            <p class="mb-1">
+              <strong>{{ intent.name }}</strong>
+              {% if not intent.enabled %}<span class="badge bg-secondary-lt">已停用</span>{% endif %}
+            </p>
+            <p class="muted mb-1">{{ intent.question_text }}</p>
+            <p class="muted mb-1">
+              候选上限 {{ intent.candidate_limit }} · 回溯 {{ intent.lookback_days }} 天
+              {% if intent.query_override %} · 手写检索式覆盖已生效{% endif %}
+            </p>
+            {% if latest_version %}
+              <p class="muted mb-1">
+                最新检索式版本：{{ latest_version.source }} ·
+                {% if latest_version.status == "ready" %}
+                  <code>{{ latest_version.query_json.get("query", "") }}</code>
+                {% else %}
+                  编译失败：{{ latest_version.error }}
+                {% endif %}
+              </p>
+            {% else %}
+              <p class="muted mb-1">还没有编译出任何检索式版本。</p>
+            {% endif %}
+
+            <div class="connection-actions">
+              <form method="post" action="/settings/intents/{{ intent.id }}/toggle" class="connection-inline-form">
+                <button type="submit" class="btn btn-sm">{{ "停用" if intent.enabled else "启用" }}</button>
+              </form>
+              <form method="post" action="/settings/intents/{{ intent.id }}/compile" class="connection-inline-form">
+                <select name="connection_id" class="form-select form-select-sm w-auto" required>
+                  {% for profile in ai_profiles %}
+                    <option value="{{ profile.id }}">{{ profile.name }}</option>
+                  {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-sm" {% if not ai_profiles %}disabled{% endif %}>编译检索式</button>
+              </form>
+              <form method="post" action="/settings/intents/{{ intent.id }}/delete" class="connection-inline-form">
+                <button type="submit" class="btn btn-sm btn-outline-danger">删除</button>
+              </form>
+            </div>
+
+            <details class="mt-2">
+              <summary class="muted">编辑 / 调度</summary>
+              <form method="post" action="/settings/intents/{{ intent.id }}/update" class="settings-form connection-create-form mt-2">
+                <input type="text" name="name" value="{{ intent.name }}" required class="form-control w-auto" placeholder="名称">
+                <input type="text" name="question_text" value="{{ intent.question_text }}" required class="form-control" placeholder="研究问题">
+                <input type="number" name="candidate_limit" value="{{ intent.candidate_limit }}" min="1" class="form-control w-auto" placeholder="候选上限">
+                <input type="number" name="lookback_days" value="{{ intent.lookback_days }}" min="1" class="form-control w-auto" placeholder="回溯天数">
+                <input type="text" name="query_override" value="{{ intent.query_override or '' }}" class="form-control" placeholder="手写检索式（留空=用 AI 编译的那条）">
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+              </form>
+              <form method="post" action="/settings/intents/{{ intent.id }}/schedule" class="settings-form d-flex gap-2 align-items-center flex-wrap mt-2">
+                <input type="text" name="cron" value="{{ schedule.cron if schedule else '' }}" class="form-control w-auto" placeholder="cron，例如 0 9 * * *">
+                <label class="form-check">
+                  <input type="checkbox" name="enabled" class="form-check-input" {% if not schedule or schedule.enabled %}checked{% endif %}>
+                  <span class="form-check-label">启用调度</span>
+                </label>
+                <button type="submit" class="btn btn-sm btn-primary">保存调度</button>
+                {% if schedule %}
+                  <span class="muted">上次运行：{{ schedule.last_run_at or "从未运行" }}</span>
+                {% endif %}
+              </form>
+              {% if schedule %}
+                <form method="post" action="/settings/intents/{{ intent.id }}/schedule/delete" class="connection-inline-form mt-1">
+                  <button type="submit" class="btn btn-sm btn-outline-danger">删除调度</button>
+                </form>
+              {% endif %}
+            </details>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    <div class="card-body">
+      <h4>新建研究意图</h4>
+      <form method="post" action="/settings/intents/create" class="settings-form connection-create-form">
+        <input type="text" name="name" placeholder="名称" required class="form-control w-auto">
+        <input type="text" name="question_text" placeholder="研究问题，例如：CRISPR base editing 体内递送的最新进展" required class="form-control">
+        <input type="number" name="candidate_limit" value="40" min="1" class="form-control w-auto" placeholder="候选上限">
+        <input type="number" name="lookback_days" value="7" min="1" class="form-control w-auto" placeholder="回溯天数">
+        <button type="submit" class="btn btn-primary">新建</button>
+      </form>
+    </div>
+  </div>
+
   <div class="card">
     <div class="card-header"><strong>日志</strong></div>
     <div class="card-body">

@@ -32,10 +32,18 @@ contract.py 声明设置表单片段，这页只负责拼"。目前落地了三�
   model + api_key + base_url，provider 目前支持 openai_compat/
   anthropic）——创建/改名改 model/base_url/启停用/设默认/换 key/删除/
   测试连接，和 sources 分区结构对称。
+- intents：`domain/intents` 的研究意图 CRUD（名称/研究问题/候选上限/
+  回溯天数/手写检索式覆盖）+ `features/query_planner.compile_intent_query`
+  （编译检索式，要选一个 ai_profile 连接，内部复用 `ai_llm_transport`/
+  `ai_llm_resolve` 这两个已有依赖——和 `/ai-assess` 走的是同一条 LLM
+  边界）+ `domain/schedules.upsert_schedule`（调度，`target_kind="intent"`
+  是这个页面和 `features.discovery` 两边分别认定的字符串约定，`discovery`
+  自己不对外导出这个常量——见该模块 README「调度认领」一节）。E3 阶段
+  的「立即运行」按钮放在首页，不在这里（见 `app/pages/home`）。
 
 v1/E2 范围的刻意裁剪：telegram/proxy 两个分区（domain/connections 同一
 张表能装，但"怎么管理某一种 kind"是各自 feature 的业务知识，留给
-E4/E5 阶段）、data-files 概览、intents/schedule 全部不在这个增量。
+E4/E5 阶段）、data-files 概览全部不在这个增量。
 分区还没多到需要抽"设置分区注册"机制的程度，继续手写拼页面。
 
 安全：features/connection_setup 和 features/ai_enrichment 的
@@ -45,7 +53,8 @@ update/rotate_*_key/delete/set_default/check 这组函数都只用
 _require_attachment_in_library 同一类问题，必须在页面层补
 `_require_source_credential_owned`/`_require_ai_profile_owned`，否则
 账号 A 能对着 /settings 页面、拿一个属于账号 B 的 connection_id 去改/删/
-转走 B 的凭据。
+转走 B 的凭据。`domain/intents.get_intent`/`domain/schedules` 同样不核对
+账号归属，这里补一个结构相同的 `_require_intent_owned`。
 """
 
 from __future__ import annotations
@@ -55,14 +64,26 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
-from app.shell.deps import current_account, db
+from app.shell.deps import ai_llm_resolve, ai_llm_transport, current_account, db
 from app.shell.deps import log_file as log_file_dependency
 from app.shell.registry import NavItem
 from app.shell.templating import templates
 from caps.citation import list_styles
+from caps.schedule import InvalidCronExpression
 from caps.template import TemplateError
 from domain.accounts import AccountDTO
 from domain.connections import ConnectionDTO, ConnectionNotFound, get_connection
+from domain.intents import (
+    IntentDTO,
+    IntentNotFound,
+    create_intent,
+    delete_intent,
+    get_intent,
+    list_intent_versions,
+    list_intents,
+    update_intent,
+)
+from domain.schedules import delete_schedule, list_schedules, upsert_schedule
 from features.ai_enrichment import (
     KIND as AI_PROFILE_KIND,
 )
@@ -72,6 +93,7 @@ from features.ai_enrichment import (
     create_ai_profile,
     delete_ai_profile,
     list_ai_profiles,
+    resolve_ai_profile,
     rotate_ai_profile_key,
     set_default_ai_profile,
     update_ai_profile,
@@ -91,6 +113,7 @@ from features.connection_setup import (
 )
 from features.exporting import resolve_citation_style, set_default_citation_style
 from features.logs_viewer import clear_log, export_log, list_entries
+from features.query_planner import compile_intent_query
 from features.uploading import resolve_naming_template, set_naming_template
 
 router = APIRouter()
@@ -98,6 +121,11 @@ nav = NavItem(key="settings", label="设置", path="/settings", icon="gear", ord
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 LOG_LIST_LIMIT = 200
+
+# `domain/schedules` 的 `target_kind` 没有枚举类型，字符串约定由认领它的
+# feature（`features.discovery`）和调它的页面各自认定——discovery 自己的
+# `_SCHEDULE_TARGET_KIND` 是私有常量，不对外导出，这里独立声明同一个字符串。
+INTENT_SCHEDULE_TARGET_KIND = "intent"
 
 
 def _require_source_credential_owned(session, account_id: int, connection_id: int) -> ConnectionDTO:
@@ -118,6 +146,16 @@ def _require_ai_profile_owned(session, account_id: int, connection_id: int) -> C
     if connection.account_id != account_id or connection.kind != AI_PROFILE_KIND:
         raise HTTPException(status_code=404, detail="连接不存在或不属于这个账号") from None
     return connection
+
+
+def _require_intent_owned(session, account_id: int, intent_id: int) -> IntentDTO:
+    try:
+        intent = get_intent(session, intent_id)
+    except IntentNotFound:
+        raise HTTPException(status_code=404, detail="研究意图不存在") from None
+    if intent.account_id != account_id:
+        raise HTTPException(status_code=404, detail="研究意图不存在或不属于这个账号") from None
+    return intent
 
 
 def _back_to_settings(error: str | None = None, *, notice: str | None = None) -> RedirectResponse:
@@ -150,6 +188,16 @@ def settings_view(
     current_naming_template = resolve_naming_template(session, account_id=account.id)
     connections = list_source_credentials(session, account_id=account.id)
     ai_profiles = list_ai_profiles(session, account_id=account.id)
+    intents = list_intents(session, account_id=account.id)
+    intent_latest_versions = {}
+    for intent in intents:
+        versions = list_intent_versions(session, intent.id)
+        intent_latest_versions[intent.id] = versions[0] if versions else None
+    intent_schedules = {
+        schedule.target_id: schedule
+        for schedule in list_schedules(session, account_id=account.id)
+        if schedule.target_kind == INTENT_SCHEDULE_TARGET_KIND
+    }
     log_min_level = log_min_level or None
     log_search = log_search or None
     log_entries = list_entries(
@@ -170,6 +218,9 @@ def settings_view(
             "sources": sorted(SOURCES),
             "ai_profiles": ai_profiles,
             "ai_providers": sorted(PROVIDERS),
+            "intents": intents,
+            "intent_latest_versions": intent_latest_versions,
+            "intent_schedules": intent_schedules,
             "error": error,
             "notice": notice,
             "log_entries": log_entries,
@@ -435,6 +486,172 @@ def delete_ai_profile_route(
     _require_ai_profile_owned(session, account.id, connection_id)
 
     delete_ai_profile(session, connection_id)
+    return RedirectResponse("/settings", status_code=303)
+
+
+# ── 研究意图（intents）────────────────────────────────────────────────────
+
+
+@router.post("/settings/intents/create")
+def create_intent_route(
+    name: str = Form(...),
+    question_text: str = Form(...),
+    candidate_limit: int = Form(40),
+    lookback_days: int = Form(7),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+
+    try:
+        create_intent(
+            session,
+            account_id=account.id,
+            name=name,
+            question_text=question_text,
+            candidate_limit=candidate_limit,
+            lookback_days=lookback_days,
+        )
+    except ValueError as error:
+        return _back_to_settings(str(error))
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/intents/{intent_id}/update")
+def update_intent_route(
+    intent_id: int,
+    name: str = Form(...),
+    question_text: str = Form(...),
+    candidate_limit: int = Form(...),
+    lookback_days: int = Form(...),
+    query_override: str = Form(""),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    _require_intent_owned(session, account.id, intent_id)
+
+    try:
+        update_intent(
+            session,
+            intent_id,
+            name=name,
+            question_text=question_text,
+            candidate_limit=candidate_limit,
+            lookback_days=lookback_days,
+            query_override=query_override.strip() or None,
+        )
+    except ValueError as error:
+        return _back_to_settings(str(error))
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/intents/{intent_id}/toggle")
+def toggle_intent_route(
+    intent_id: int,
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    intent = _require_intent_owned(session, account.id, intent_id)
+
+    update_intent(session, intent_id, enabled=not intent.enabled)
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/intents/{intent_id}/delete")
+def delete_intent_route(
+    intent_id: int,
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    _require_intent_owned(session, account.id, intent_id)
+
+    delete_schedule(session, target_kind=INTENT_SCHEDULE_TARGET_KIND, target_id=intent_id)
+    delete_intent(session, intent_id)
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/intents/{intent_id}/compile")
+def compile_intent_query_route(
+    intent_id: int,
+    connection_id: int = Form(...),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+    transport=Depends(ai_llm_transport),
+    resolve=Depends(ai_llm_resolve),
+):
+    """选哪个 ai_profile 连接来编译是调用方（这个页面）的决定，`query_planner`
+    本身不认识 `domain/connections`——和 `/l/.../ai-assess` 走的是同一条
+    `resolve_ai_profile()` 解析路径（provider/model/api_key/base_url），
+    理由见 `features/ai_enrichment.resolve_ai_profile` 自己的 docstring。
+    编译失败时 `compile_intent_query` 不抛异常，而是落一条 `status="failed"`
+    的版本（见 `features/query_planner` README）——这里读返回值的
+    `status` 字段来决定提示文案，不是 try/except。
+    """
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    _require_intent_owned(session, account.id, intent_id)
+    _require_ai_profile_owned(session, account.id, connection_id)
+
+    provider, model, base_url, api_key = resolve_ai_profile(session, connection_id)
+    version = compile_intent_query(
+        session,
+        intent_id=intent_id,
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        transport=transport,
+        resolve=resolve,
+    )
+    if version.status == "failed":
+        return _back_to_settings(f"检索式编译失败：{version.error}")
+    return _back_to_settings(notice="检索式编译成功")
+
+
+@router.post("/settings/intents/{intent_id}/schedule")
+def upsert_intent_schedule_route(
+    intent_id: int,
+    cron: str = Form(...),
+    enabled: str | None = Form(None),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    _require_intent_owned(session, account.id, intent_id)
+
+    try:
+        upsert_schedule(
+            session,
+            account_id=account.id,
+            target_kind=INTENT_SCHEDULE_TARGET_KIND,
+            target_id=intent_id,
+            cron=cron.strip(),
+            enabled=enabled is not None,
+        )
+    except InvalidCronExpression as error:
+        return _back_to_settings(str(error))
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/intents/{intent_id}/schedule/delete")
+def delete_intent_schedule_route(
+    intent_id: int,
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    _require_intent_owned(session, account.id, intent_id)
+
+    delete_schedule(session, target_kind=INTENT_SCHEDULE_TARGET_KIND, target_id=intent_id)
     return RedirectResponse("/settings", status_code=303)
 
 

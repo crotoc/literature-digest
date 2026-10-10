@@ -1,6 +1,9 @@
 import json
 import re
 
+import httpx
+
+from app.shell.deps import ai_llm_transport as ai_llm_transport_dependency
 from app.shell.deps import log_file as log_file_dependency
 
 PASSWORD = "correct-horse-battery-staple"
@@ -470,3 +473,195 @@ def test_ai_profile_mutations_reject_connection_of_source_credential_kind(client
 
     response = client.post(f"/settings/ai-profiles/{connection_id}/toggle")
     assert response.status_code == 404
+
+
+# ── 研究意图 ─────────────────────────────────────────────────────────────
+
+
+def _intent_id_from_settings(html, name):
+    idx = html.find(name)
+    assert idx != -1, html
+    match = re.search(r"intents/(\d+)/", html[idx:])
+    assert match is not None, html[idx:]
+    return int(match.group(1))
+
+
+def _openai_transport(payload: dict):
+    """和 `app/pages/library/tests/test_library.py` 同名 helper 同一种
+    构造方式——按项目约定各测试文件各自复制一份，不跨目录 import。"""
+    content = json.dumps(payload)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    return httpx.MockTransport(handler)
+
+
+def test_create_intent_then_it_shows_in_the_list(client):
+    _register(client, username="finn10", email="finn10@example.org")
+
+    response = client.post(
+        "/settings/intents/create",
+        data={"name": "crispr-radar", "question_text": "CRISPR base editing 体内递送的最新进展"},
+    )
+    assert response.status_code == 200
+    assert "crispr-radar" in response.text
+    assert "还没有编译出任何检索式版本" in response.text
+
+
+def test_create_intent_rejects_empty_question(client):
+    _register(client, username="greta10", email="greta10@example.org")
+
+    response = client.post("/settings/intents/create", data={"name": "x", "question_text": "   "})
+    assert response.status_code == 200
+    assert "研究问题描述不能为空" in response.text
+
+
+def test_update_intent_changes_candidate_limit_and_lookback(client):
+    _register(client, username="hank10", email="hank10@example.org")
+    client.post("/settings/intents/create", data={"name": "update-me", "question_text": "q"})
+    index = client.get("/settings")
+    intent_id = _intent_id_from_settings(index.text, "update-me")
+
+    response = client.post(
+        f"/settings/intents/{intent_id}/update",
+        data={"name": "update-me", "question_text": "q2", "candidate_limit": "10", "lookback_days": "3"},
+    )
+    assert response.status_code == 200
+    assert "候选上限 10" in response.text
+    assert "回溯 3 天" in response.text
+
+
+def test_toggle_then_delete_intent(client):
+    _register(client, username="ivy10", email="ivy10@example.org")
+    client.post("/settings/intents/create", data={"name": "toggle-me", "question_text": "q"})
+    index = client.get("/settings")
+    intent_id = _intent_id_from_settings(index.text, "toggle-me")
+
+    toggled = client.post(f"/settings/intents/{intent_id}/toggle")
+    assert "已停用" in toggled.text
+
+    deleted = client.post(f"/settings/intents/{intent_id}/delete")
+    assert "toggle-me" not in deleted.text
+
+
+def test_intent_mutations_require_login(client):
+    _register(client, username="jett10", email="jett10@example.org")
+    client.post("/settings/intents/create", data={"name": "anon-test", "question_text": "q"})
+    index = client.get("/settings")
+    intent_id = _intent_id_from_settings(index.text, "anon-test")
+    client.post("/logout")
+
+    for path in ("toggle", "delete"):
+        response = client.post(f"/settings/intents/{intent_id}/{path}")
+        assert str(response.url).endswith("/login"), path
+
+
+def test_intent_mutations_reject_intent_id_from_another_account(client):
+    _register(client, username="kara10", email="kara10@example.org")
+    client.post("/settings/intents/create", data={"name": "karas-intent", "question_text": "q"})
+    index = client.get("/settings")
+    intent_id = _intent_id_from_settings(index.text, "karas-intent")
+    client.post("/logout")
+
+    _register(client, username="mika10", email="mika10@example.org")
+    response = client.post(f"/settings/intents/{intent_id}/toggle")
+    assert response.status_code == 404
+
+
+def test_compile_intent_query_route_succeeds_and_shows_query(client):
+    _register(client, username="liam10", email="liam10@example.org")
+    client.post("/settings/intents/create", data={"name": "compile-me", "question_text": "q"})
+    client.post(
+        "/settings/ai-profiles/create",
+        data={"provider": "openai_compat", "name": "my-ai", "model": "gpt-4o-mini", "api_key": "sk-test"},
+    )
+    index = client.get("/settings")
+    intent_id = _intent_id_from_settings(index.text, "compile-me")
+    connection_id = _ai_profile_id_from_settings(index.text, "my-ai")
+
+    client.app.dependency_overrides[ai_llm_transport_dependency] = lambda: _openai_transport(
+        {"query": "crispr[tiab] AND base editing[tiab]", "rationale": "聚焦标题/摘要关键词"}
+    )
+
+    response = client.post(
+        f"/settings/intents/{intent_id}/compile", data={"connection_id": str(connection_id)}
+    )
+    assert response.status_code == 200
+    assert "crispr[tiab]" in response.text
+    assert "检索式编译成功" in response.text
+
+
+def test_compile_intent_query_route_shows_failure_when_llm_errors(client):
+    _register(client, username="mika11", email="mika11@example.org")
+    client.post("/settings/intents/create", data={"name": "fail-me", "question_text": "q"})
+    client.post(
+        "/settings/ai-profiles/create",
+        data={"provider": "openai_compat", "name": "my-ai2", "model": "gpt-4o-mini", "api_key": "sk-test"},
+    )
+    index = client.get("/settings")
+    intent_id = _intent_id_from_settings(index.text, "fail-me")
+    connection_id = _ai_profile_id_from_settings(index.text, "my-ai2")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, content=b"boom")
+
+    client.app.dependency_overrides[ai_llm_transport_dependency] = lambda: httpx.MockTransport(handler)
+
+    response = client.post(
+        f"/settings/intents/{intent_id}/compile", data={"connection_id": str(connection_id)}
+    )
+    assert response.status_code == 200
+    assert "检索式编译失败" in response.text
+
+
+def test_compile_intent_query_route_rejects_connection_of_another_account(client):
+    _register(client, username="noa10", email="noa10@example.org")
+    client.post("/settings/intents/create", data={"name": "cross-account-compile", "question_text": "q"})
+    index = client.get("/settings")
+    intent_id = _intent_id_from_settings(index.text, "cross-account-compile")
+    client.post("/logout")
+
+    _register(client, username="opal10", email="opal10@example.org")
+    client.post(
+        "/settings/ai-profiles/create",
+        data={"provider": "openai_compat", "name": "opals-ai", "model": "gpt-4o-mini", "api_key": "sk-test"},
+    )
+    other_index = client.get("/settings")
+    connection_id = _ai_profile_id_from_settings(other_index.text, "opals-ai")
+
+    response = client.post(
+        f"/settings/intents/{intent_id}/compile", data={"connection_id": str(connection_id)}
+    )
+    assert response.status_code == 404
+
+
+def test_upsert_then_delete_intent_schedule(client):
+    # 故意不用模板里占位符文案同款的 "0 9 * * *"（`placeholder="...0 9 * * *"`
+    # 本身就一直出现在 HTML 里），换一个不会和占位符撞上的 cron 串，
+    # 靠精确匹配 `value="..."` 属性而不是裸子串来确认保存/删除生效。
+    _register(client, username="pike10", email="pike10@example.org")
+    client.post("/settings/intents/create", data={"name": "schedule-me", "question_text": "q"})
+    index = client.get("/settings")
+    intent_id = _intent_id_from_settings(index.text, "schedule-me")
+
+    response = client.post(
+        f"/settings/intents/{intent_id}/schedule", data={"cron": "0 10 * * *", "enabled": "on"}
+    )
+    assert response.status_code == 200
+    assert 'value="0 10 * * *"' in response.text
+
+    deleted = client.post(f"/settings/intents/{intent_id}/schedule/delete")
+    assert deleted.status_code == 200
+    assert 'value="0 10 * * *"' not in deleted.text
+
+
+def test_upsert_intent_schedule_rejects_invalid_cron(client):
+    _register(client, username="quin10", email="quin10@example.org")
+    client.post("/settings/intents/create", data={"name": "bad-cron", "question_text": "q"})
+    index = client.get("/settings")
+    intent_id = _intent_id_from_settings(index.text, "bad-cron")
+
+    response = client.post(f"/settings/intents/{intent_id}/schedule", data={"cron": "not-a-cron"})
+    assert response.status_code == 200
+    assert "alert-danger" in response.text
