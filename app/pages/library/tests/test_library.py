@@ -991,6 +991,34 @@ def test_upload_attachment_then_download_then_delete(client):
     assert "notes.txt" not in delete_response.text
 
 
+def test_upload_attachment_applies_account_naming_template(client):
+    """`app/pages/settings` 的附件命名模板要真的被 `upload_attachment_route`
+    读到并传给 `upload_file`——这是和 metadata_lookup 同一类"feature 早就
+    支持、页面此前没接上"的缺口，这条测试锚定的正是这根接线，不是
+    `features/uploading` 自己已经测过的渲染逻辑本身。`_import_sample` 的
+    work 标题 "A Sample Paper"、年份 2020、没有作者（`SAMPLE_RIS` 没有
+    `AU` 字段），所以 `[firstauthor]` 落到 `_naming_values` 的"unknown"
+    兜底值；模板全小写书写，`caps.template.render_bracket` 按"占位名的
+    写法决定输出大小写"的约定把渲染结果也转小写（数字部分不受影响），
+    所以渲染结果是确定的 "unknown_2020"，加回原始后缀 ".txt"。
+    """
+    _register(client, username="ursula4", email="ursula4@example.org")
+    client.post("/settings/attachment-naming", data={"template": "[firstauthor]_[year]"})
+    work_id = _import_sample(client)
+    lib_response = client.get("/library")
+    library_url = str(lib_response.url).replace("http://testserver", "")
+
+    upload_response = client.post(
+        f"{library_url}works/{work_id}/attachments/upload",
+        data={"view": "all", "sort_by": "updated_at", "sort_dir": "desc", "page": "1"},
+        files={"file": ("notes.txt", b"hello attachment", "text/plain")},
+    )
+
+    assert upload_response.status_code == 200
+    assert "unknown_2020.txt" in upload_response.text
+    assert "notes.txt" not in upload_response.text
+
+
 def test_upload_attachment_requires_login(client):
     _register(client, username="wendy4", email="wendy4@example.org")
     work_id = _import_sample(client)

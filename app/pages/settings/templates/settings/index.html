@@ -21,6 +21,19 @@
     <button type="submit" class="btn btn-primary">保存</button>
   </form>
 
+  <h3>附件命名</h3>
+  <p class="muted">
+    上传附件时按这个方括号模板重命名（后缀保留原始文件名的后缀）；
+    留空则保留原始文件名。可用占位：<code>[firstauthor]</code>
+    <code>[year]</code> <code>[title]</code>，支持 <code>[title:20]</code>
+    这种截断写法。
+  </p>
+  <form method="post" action="/settings/attachment-naming" class="settings-form">
+    <input type="text" name="template" value="{{ current_naming_template }}"
+           placeholder="例如 [firstauthor]_[year]_[title:30]" size="40">
+    <button type="submit" class="btn btn-primary">保存</button>
+  </form>
+
   <h3>数据源凭据</h3>
   <p class="muted">Crossref / PubMed 元数据查询用的访问凭据。</p>
 

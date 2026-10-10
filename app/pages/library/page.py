@@ -68,7 +68,12 @@ failed outcome、不中断其余项、不抛到页面层，和 `features/dedupe_
 整目录批量上传接的是 `upload_batch`（保留相对路径，父 job + 每文件
 独立成败，瞬时批量粒度），v1 范围裁剪：重名策略固定用默认的
 `"rename"`（追加编号），不开 UI 让用户选 ask/overwrite——那是"重名
-策略"这个独立决策，不该现在顺带定下来。
+策略"这个独立决策，不该现在顺带定下来。两处上传调用都把
+`naming_template` 传成 `app/pages/settings` 新增的账号级设置
+（`resolve_naming_template`）——这是扒功能清单时漏掉的另一个缺口：
+`features/uploading` 早就支持按模板重命名附件，只是此前没有任何页面
+读取这个设置、也没有把它传进 `upload_file`/`upload_batch`，所以配了也
+不生效。
 `upload_file`/`remove_attachment`/`download_attachment` 三个函数都只认
 `attachment_id`、不核对它是不是真的属于传入的 `library_id`（`upload_file`
 内部会查 `work_id` 的库，但 `remove_attachment`/`download_attachment`
@@ -174,6 +179,7 @@ from features.uploading import (
     UploadRejected,
     download_attachment,
     remove_attachment,
+    resolve_naming_template,
     upload_batch,
     upload_file,
 )
@@ -940,6 +946,7 @@ def upload_attachment_route(
             filename=file.filename,
             content=file.file,
             blob_store=store,
+            naming_template=resolve_naming_template(session, account_id=account.id),
         )
     except (UploadRejected, FilenameConflict) as error:
         return _back_to_list_with_error(
@@ -994,6 +1001,7 @@ def upload_attachment_batch_route(
     result = upload_batch(
         session, account_id=account.id, library_id=library_id, work_id=work_id,
         files=items, blob_store=store,
+        naming_template=resolve_naming_template(session, account_id=account.id),
     )
     failed = sum(1 for outcome in result.outcomes if outcome.status == "failed")
     if failed:

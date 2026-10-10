@@ -54,6 +54,54 @@ def test_save_citation_style_requires_login(client):
     assert str(response.url).endswith("/login")
 
 
+def test_settings_view_shows_empty_naming_template_by_default(client):
+    _register(client, username="erin3", email="erin3@example.org")
+
+    response = client.get("/settings")
+
+    assert response.status_code == 200
+    assert 'name="template" value=""' in response.text
+
+
+def test_save_naming_template_then_it_shows_as_current_value(client):
+    _register(client, username="finn3", email="finn3@example.org")
+
+    response = client.post(
+        "/settings/attachment-naming", data={"template": "[firstauthor]_[year]_[title:20]"}
+    )
+
+    assert response.status_code == 200
+    assert 'name="template" value="[firstauthor]_[year]_[title:20]"' in response.text
+
+
+def test_save_naming_template_rejects_unknown_placeholder(client):
+    _register(client, username="gail3", email="gail3@example.org")
+
+    response = client.post("/settings/attachment-naming", data={"template": "[doi]_[year]"})
+
+    assert response.status_code == 200
+    assert "不认识的占位" in response.text
+
+
+def test_save_naming_template_with_blank_value_clears_it(client):
+    _register(client, username="hank3", email="hank3@example.org")
+    client.post("/settings/attachment-naming", data={"template": "[year]"})
+
+    response = client.post("/settings/attachment-naming", data={"template": "  "})
+
+    assert response.status_code == 200
+    assert 'name="template" value=""' in response.text
+
+
+def test_save_naming_template_requires_login(client):
+    _register(client, username="iris3", email="iris3@example.org")
+    client.post("/logout")
+
+    response = client.post("/settings/attachment-naming", data={"template": "[year]"})
+
+    assert str(response.url).endswith("/login")
+
+
 def test_citation_style_change_affects_library_card_rendering(client):
     _register(client, username="erin3", email="erin3@example.org")
     r = client.post(

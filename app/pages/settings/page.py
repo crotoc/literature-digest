@@ -6,6 +6,11 @@ contract.py 声明设置表单片段，这页只负责拼"。目前落地了三�
 
 - citations：features/exporting 的 `resolve_citation_style`/
   `set_default_citation_style`（账号→站点→代码默认三级回退）。
+- attachment-naming：features/uploading 的 `resolve_naming_template`/
+  `set_naming_template`——账号级的附件重命名方括号模板（`[firstauthor]`/
+  `[year]`/`[title]`），和 citations 同一类"只有一个账号级设置值"的最简
+  分区。这是扒功能清单时漏掉的一个早就完整可用的设置项，一直没有页面
+  调它（和 metadata_lookup 同一类"feature 完整、页面缺口"）。
 - sources：features/connection_setup 管理的数据源凭据（v1 只有
   source_credential 一种 kind，对应 Crossref/PubMed）——创建/改名改
   mailto/启停用/设默认/换 PubMed API key/删除/测试连接。
@@ -49,6 +54,7 @@ from app.shell.deps import log_file as log_file_dependency
 from app.shell.registry import NavItem
 from app.shell.templating import templates
 from caps.citation import list_styles
+from caps.template import TemplateError
 from domain.accounts import AccountDTO
 from domain.connections import ConnectionDTO, ConnectionNotFound, get_connection
 from features.connection_setup import (
@@ -66,6 +72,7 @@ from features.connection_setup import (
 )
 from features.exporting import resolve_citation_style, set_default_citation_style
 from features.logs_viewer import clear_log, export_log, list_entries
+from features.uploading import resolve_naming_template, set_naming_template
 
 router = APIRouter()
 nav = NavItem(key="settings", label="设置", path="/settings", icon="gear", order=50)
@@ -111,6 +118,7 @@ def settings_view(
         return RedirectResponse("/login", status_code=303)
 
     current_style = resolve_citation_style(session, account_id=account.id)
+    current_naming_template = resolve_naming_template(session, account_id=account.id)
     connections = list_source_credentials(session, account_id=account.id)
     log_min_level = log_min_level or None
     log_search = log_search or None
@@ -127,6 +135,7 @@ def settings_view(
             "active_nav": "settings",
             "styles": sorted(list_styles()),
             "current_style": current_style,
+            "current_naming_template": current_naming_template or "",
             "connections": connections,
             "sources": sorted(SOURCES),
             "error": error,
@@ -152,6 +161,30 @@ def save_citation_style_route(
         raise HTTPException(status_code=400, detail=f"不支持的引用样式：{style!r}")
 
     set_default_citation_style(session, account_id=account.id, style=style)
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/attachment-naming")
+def save_attachment_naming_template_route(
+    template: str = Form(""),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    """空字符串写成 `None`——`resolve_naming_template()`/`upload_file()` 的
+    约定是 `None` 表示"保留原始文件名"，不是"模板是空字符串"（见
+    features/uploading 自己的 docstring）。模板里有不认识的占位符时，
+    `set_naming_template` 内部调 `caps.template.validate_bracket_template`
+    抛 `TemplateError`（具体是 `UnknownPlaceholder`），这里原样显示
+    `str(error)`——那条消息已经是"模板里有不认识的占位：[...]；可用的是
+    [...]"这种可读文案，不需要再加工。
+    """
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+
+    try:
+        set_naming_template(session, account_id=account.id, template=template.strip() or None)
+    except TemplateError as error:
+        return _back_to_settings(str(error))
     return RedirectResponse("/settings", status_code=303)
 
 
