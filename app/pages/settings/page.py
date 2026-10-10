@@ -28,16 +28,22 @@ contract.py 声明设置表单片段，这页只负责拼"。目前落地了三�
   路径是同一个（`tests/conftest.py` 没单独配 `LOG_FILE`），不走依赖
   注入换成临时文件，跑一次测试就会清空真实的 `data/app.log`。
 
-v1 范围的刻意裁剪：ai/telegram/proxy 三个分区（domain/connections 同一
-张表能装，但"怎么管理某一种 kind"是各自 feature 的业务知识，留给
-E2/E4/E5 阶段）、data-files 概览、intents/schedule 全部不在这个增量。
-三个分区还没多到需要抽"设置分区注册"机制的程度，继续手写拼页面。
+- ai：features/ai_enrichment 管理的 ai_profile 连接（provider +
+  model + api_key + base_url，provider 目前支持 openai_compat/
+  anthropic）——创建/改名改 model/base_url/启停用/设默认/换 key/删除/
+  测试连接，和 sources 分区结构对称。
 
-安全：features/connection_setup 的 update/rotate_api_key/delete/
-set_default/check 五个函数都只用 `get_connection(db, connection_id)` +
-"kind 是不是 source_credential" 两道检查，**不核对这个连接是不是真的
-属于当前账号**——和 _require_work_in_library/_require_attachment_in_library
-同一类问题，必须在页面层补 `_require_source_credential_owned`，否则
+v1/E2 范围的刻意裁剪：telegram/proxy 两个分区（domain/connections 同一
+张表能装，但"怎么管理某一种 kind"是各自 feature 的业务知识，留给
+E4/E5 阶段）、data-files 概览、intents/schedule 全部不在这个增量。
+分区还没多到需要抽"设置分区注册"机制的程度，继续手写拼页面。
+
+安全：features/connection_setup 和 features/ai_enrichment 的
+update/rotate_*_key/delete/set_default/check 这组函数都只用
+`get_connection(db, connection_id)` + "kind 对不对" 两道检查，**不核对
+这个连接是不是真的属于当前账号**——和 _require_work_in_library/
+_require_attachment_in_library 同一类问题，必须在页面层补
+`_require_source_credential_owned`/`_require_ai_profile_owned`，否则
 账号 A 能对着 /settings 页面、拿一个属于账号 B 的 connection_id 去改/删/
 转走 B 的凭据。
 """
@@ -57,6 +63,19 @@ from caps.citation import list_styles
 from caps.template import TemplateError
 from domain.accounts import AccountDTO
 from domain.connections import ConnectionDTO, ConnectionNotFound, get_connection
+from features.ai_enrichment import (
+    KIND as AI_PROFILE_KIND,
+)
+from features.ai_enrichment import (
+    PROVIDERS,
+    check_ai_profile,
+    create_ai_profile,
+    delete_ai_profile,
+    list_ai_profiles,
+    rotate_ai_profile_key,
+    set_default_ai_profile,
+    update_ai_profile,
+)
 from features.connection_setup import (
     KIND as SOURCE_CREDENTIAL_KIND,
 )
@@ -91,6 +110,16 @@ def _require_source_credential_owned(session, account_id: int, connection_id: in
     return connection
 
 
+def _require_ai_profile_owned(session, account_id: int, connection_id: int) -> ConnectionDTO:
+    try:
+        connection = get_connection(session, connection_id)
+    except ConnectionNotFound:
+        raise HTTPException(status_code=404, detail="连接不存在") from None
+    if connection.account_id != account_id or connection.kind != AI_PROFILE_KIND:
+        raise HTTPException(status_code=404, detail="连接不存在或不属于这个账号") from None
+    return connection
+
+
 def _back_to_settings(error: str | None = None, *, notice: str | None = None) -> RedirectResponse:
     url = "/settings"
     params = {}
@@ -120,6 +149,7 @@ def settings_view(
     current_style = resolve_citation_style(session, account_id=account.id)
     current_naming_template = resolve_naming_template(session, account_id=account.id)
     connections = list_source_credentials(session, account_id=account.id)
+    ai_profiles = list_ai_profiles(session, account_id=account.id)
     log_min_level = log_min_level or None
     log_search = log_search or None
     log_entries = list_entries(
@@ -138,6 +168,8 @@ def settings_view(
             "current_naming_template": current_naming_template or "",
             "connections": connections,
             "sources": sorted(SOURCES),
+            "ai_profiles": ai_profiles,
+            "ai_providers": sorted(PROVIDERS),
             "error": error,
             "notice": notice,
             "log_entries": log_entries,
@@ -293,6 +325,116 @@ def delete_source_credential_route(
     _require_source_credential_owned(session, account.id, connection_id)
 
     delete_source_credential(session, connection_id)
+    return RedirectResponse("/settings", status_code=303)
+
+
+# ── ai_profile 连接 ──────────────────────────────────────────────────────
+
+
+@router.post("/settings/ai-profiles/create")
+def create_ai_profile_route(
+    provider: str = Form(...),
+    name: str = Form(...),
+    model: str = Form(...),
+    api_key: str = Form(...),
+    base_url: str = Form(""),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+
+    if provider not in PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"不支持的 provider：{provider!r}")
+    if not name.strip():
+        return _back_to_settings("连接名不能为空")
+
+    try:
+        create_ai_profile(
+            session,
+            account_id=account.id,
+            provider=provider,
+            name=name.strip(),
+            model=model.strip(),
+            api_key=api_key.strip(),
+            base_url=base_url.strip() or None,
+        )
+    except ValueError as error:
+        return _back_to_settings(str(error))
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/ai-profiles/{connection_id}/toggle")
+def toggle_ai_profile_route(
+    connection_id: int,
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    connection = _require_ai_profile_owned(session, account.id, connection_id)
+
+    update_ai_profile(session, connection_id, enabled=not connection.enabled)
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/ai-profiles/{connection_id}/set-default")
+def set_default_ai_profile_route(
+    connection_id: int,
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    _require_ai_profile_owned(session, account.id, connection_id)
+
+    set_default_ai_profile(session, connection_id)
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/ai-profiles/{connection_id}/rotate-key")
+def rotate_ai_profile_key_route(
+    connection_id: int,
+    api_key: str = Form(...),
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    _require_ai_profile_owned(session, account.id, connection_id)
+
+    if not api_key.strip():
+        return _back_to_settings("API key 不能为空")
+
+    rotate_ai_profile_key(session, connection_id, api_key=api_key.strip())
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/ai-profiles/{connection_id}/check")
+def check_ai_profile_route(
+    connection_id: int,
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    _require_ai_profile_owned(session, account.id, connection_id)
+
+    check_ai_profile(session, connection_id)
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/ai-profiles/{connection_id}/delete")
+def delete_ai_profile_route(
+    connection_id: int,
+    account: AccountDTO | None = Depends(current_account),
+    session=Depends(db),
+):
+    if account is None:
+        return RedirectResponse("/login", status_code=303)
+    _require_ai_profile_owned(session, account.id, connection_id)
+
+    delete_ai_profile(session, connection_id)
     return RedirectResponse("/settings", status_code=303)
 
 

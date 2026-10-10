@@ -1,5 +1,6 @@
 import pytest
 
+from domain.connections import create_connection
 from features.ai_enrichment import (
     UnknownProvider,
     WrongKind,
@@ -77,10 +78,12 @@ def test_rotate_then_delete_then_set_default(db):
 
 
 def test_ai_profile_operations_reject_connection_of_another_kind(db):
-    from features.connection_setup import create_source_credential
-
-    source_credential = create_source_credential(
-        db, account_id=ACCOUNT, source="crossref", name="not-an-ai-profile"
+    """不借 features/connection_setup 造一个 source_credential——features
+    之间禁止互相 import（lint 规则 4）。直接用 domain.connections 造一个
+    别的 kind 的连接即可，本模块对 domain/connections 本来就是合法依赖。"""
+    source_credential = create_connection(
+        db, account_id=ACCOUNT, kind="source_credential", name="not-an-ai-profile",
+        config={"source": "crossref"},
     )
 
     for fn, kwargs in (

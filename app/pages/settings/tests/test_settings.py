@@ -351,3 +351,122 @@ def test_log_routes_require_login(client):
     for method, path in (("post", "/settings/logs/clear"), ("get", "/settings/logs/export")):
         response = getattr(client, method)(path)
         assert str(response.url).endswith("/login"), path
+
+
+# ── AI 模型连接 ──────────────────────────────────────────────────────────
+
+
+def _ai_profile_id_from_settings(html, name):
+    idx = html.find(name)
+    assert idx != -1, html
+    match = re.search(r"ai-profiles/(\d+)/", html[idx:])
+    assert match is not None, html[idx:]
+    return int(match.group(1))
+
+
+def test_create_ai_profile_then_it_shows_in_the_list(client):
+    _register(client, username="finn8", email="finn8@example.org")
+
+    response = client.post(
+        "/settings/ai-profiles/create",
+        data={"provider": "openai_compat", "name": "my-openai", "model": "gpt-4o-mini", "api_key": "sk-test"},
+    )
+    assert response.status_code == 200
+    assert "my-openai" in response.text
+    assert "gpt-4o-mini" in response.text
+
+
+def test_create_ai_profile_rejects_unknown_provider(client):
+    _register(client, username="greta8", email="greta8@example.org")
+
+    response = client.post(
+        "/settings/ai-profiles/create",
+        data={"provider": "deepseek", "name": "x", "model": "x", "api_key": "sk-test"},
+    )
+    assert response.status_code == 400
+
+
+def test_toggle_then_set_default_then_delete_ai_profile(client):
+    _register(client, username="hank8", email="hank8@example.org")
+    client.post(
+        "/settings/ai-profiles/create",
+        data={"provider": "openai_compat", "name": "toggle-me", "model": "gpt-4o-mini", "api_key": "sk-test"},
+    )
+    index = client.get("/settings")
+    connection_id = _ai_profile_id_from_settings(index.text, "toggle-me")
+
+    toggled = client.post(f"/settings/ai-profiles/{connection_id}/toggle")
+    assert "已停用" in toggled.text
+
+    defaulted = client.post(f"/settings/ai-profiles/{connection_id}/set-default")
+    assert "默认" in defaulted.text
+
+    deleted = client.post(f"/settings/ai-profiles/{connection_id}/delete")
+    assert "toggle-me" not in deleted.text
+
+
+def test_rotate_ai_profile_api_key(client):
+    _register(client, username="ivy8", email="ivy8@example.org")
+    client.post(
+        "/settings/ai-profiles/create",
+        data={
+            "provider": "anthropic",
+            "name": "rotate-me",
+            "model": "claude-haiku-4-5-20251001",
+            "api_key": "sk-ant-test",
+        },
+    )
+    index = client.get("/settings")
+    connection_id = _ai_profile_id_from_settings(index.text, "rotate-me")
+
+    response = client.post(
+        f"/settings/ai-profiles/{connection_id}/rotate-key", data={"api_key": "sk-ant-second"}
+    )
+    assert response.status_code == 200
+    assert "rotate-me" in response.text
+
+
+def test_ai_profile_mutations_require_login(client):
+    _register(client, username="kara8", email="kara8@example.org")
+    client.post(
+        "/settings/ai-profiles/create",
+        data={"provider": "openai_compat", "name": "anon-test", "model": "gpt-4o-mini", "api_key": "sk-test"},
+    )
+    index = client.get("/settings")
+    connection_id = _ai_profile_id_from_settings(index.text, "anon-test")
+    client.post("/logout")
+
+    for path in ("toggle", "set-default", "delete", "check"):
+        response = client.post(f"/settings/ai-profiles/{connection_id}/{path}")
+        assert str(response.url).endswith("/login"), path
+
+
+def test_ai_profile_mutations_reject_connection_id_from_another_account(client):
+    _register(client, username="liam8", email="liam8@example.org")
+    client.post(
+        "/settings/ai-profiles/create",
+        data={
+            "provider": "openai_compat",
+            "name": "liams-profile",
+            "model": "gpt-4o-mini",
+            "api_key": "sk-test",
+        },
+    )
+    index = client.get("/settings")
+    connection_id = _ai_profile_id_from_settings(index.text, "liams-profile")
+    client.post("/logout")
+
+    _register(client, username="mika8", email="mika8@example.org")
+    for path in ("toggle", "set-default", "delete"):
+        response = client.post(f"/settings/ai-profiles/{connection_id}/{path}")
+        assert response.status_code == 404, path
+
+
+def test_ai_profile_mutations_reject_connection_of_source_credential_kind(client):
+    _register(client, username="noa8", email="noa8@example.org")
+    client.post("/settings/connections/create", data={"source": "crossref", "name": "not-an-ai-profile"})
+    index = client.get("/settings")
+    connection_id = _connection_id_from_settings(index.text, "not-an-ai-profile")
+
+    response = client.post(f"/settings/ai-profiles/{connection_id}/toggle")
+    assert response.status_code == 404

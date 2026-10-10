@@ -108,6 +108,71 @@
     </div>
   </div>
 
+  <div class="card mb-3">
+    <div class="card-header"><strong>AI 模型连接</strong></div>
+    <div class="card-body">
+      <p class="muted mb-0">AI 打标签 / AI 点评 / AI 分组提案用的模型连接。</p>
+      {% if not ai_profiles %}
+        <p class="muted mb-0">还没有配置任何 AI 模型连接。</p>
+      {% endif %}
+    </div>
+    {% if ai_profiles %}
+      <ul class="connection-list list-group list-group-flush">
+        {% for profile in ai_profiles %}
+          <li class="connection-row list-group-item">
+            <p class="mb-1">
+              <strong>{{ profile.name }}</strong>
+              <span class="muted">（{{ profile.config.provider }} · {{ profile.config.model }}）</span>
+              {% if profile.is_default %}<span class="badge bg-blue-lt">默认</span>{% endif %}
+              {% if not profile.enabled %}<span class="badge bg-secondary-lt">已停用</span>{% endif %}
+            </p>
+            {% if profile.last_checked_at %}
+              <p class="muted mb-1">
+                上次测试：{{ profile.last_checked_at }} ·
+                {% if profile.last_check_ok %}成功{% else %}失败：{{ profile.last_check_message }}{% endif %}
+              </p>
+            {% endif %}
+            <div class="connection-actions">
+              <form method="post" action="/settings/ai-profiles/{{ profile.id }}/toggle" class="connection-inline-form">
+                <button type="submit" class="btn btn-sm">{{ "停用" if profile.enabled else "启用" }}</button>
+              </form>
+              {% if not profile.is_default %}
+                <form method="post" action="/settings/ai-profiles/{{ profile.id }}/set-default" class="connection-inline-form">
+                  <button type="submit" class="btn btn-sm">设为默认</button>
+                </form>
+              {% endif %}
+              <form method="post" action="/settings/ai-profiles/{{ profile.id }}/check" class="connection-inline-form">
+                <button type="submit" class="btn btn-sm">测试连接</button>
+              </form>
+              <form method="post" action="/settings/ai-profiles/{{ profile.id }}/rotate-key" class="connection-inline-form">
+                <input type="password" name="api_key" placeholder="新 API key" size="20" required class="form-control form-control-sm">
+                <button type="submit" class="btn btn-sm">更换 key</button>
+              </form>
+              <form method="post" action="/settings/ai-profiles/{{ profile.id }}/delete" class="connection-inline-form">
+                <button type="submit" class="btn btn-sm btn-outline-danger">删除</button>
+              </form>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    <div class="card-body">
+      <h4>新建 AI 模型连接</h4>
+      <form method="post" action="/settings/ai-profiles/create" class="settings-form connection-create-form">
+        <select name="provider" class="form-select w-auto">
+          {% for provider in ai_providers %}
+            <option value="{{ provider }}">{{ provider }}</option>
+          {% endfor %}
+        </select>
+        <input type="text" name="name" placeholder="连接名" required class="form-control w-auto">
+        <input type="text" name="model" placeholder="模型名，例如 gpt-4o-mini" required class="form-control w-auto">
+        <input type="password" name="api_key" placeholder="API key" required class="form-control w-auto">
+        <input type="text" name="base_url" placeholder="base_url（可选，自建/代理端点才填）" class="form-control w-auto">
+        <button type="submit" class="btn btn-primary">新建</button>
+      </form>
+    </div>
+  </div>
+
   <div class="card">
     <div class="card-header"><strong>日志</strong></div>
     <div class="card-body">
