@@ -25,6 +25,9 @@ def create_app(*, create_tables: bool | None = None) -> FastAPI:
     for page in pages:
         application.include_router(page.router)
 
+    from app.api.extension import router as extension_router
+    application.include_router(extension_router)
+
     nav = registry.nav_items(pages)
     templates.env.globals["nav_items"] = nav
     templates.env.globals["active_nav"] = None

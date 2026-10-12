@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}报告 · literature-digest{% endblock %}
+{% block content %}
+<h1>研究报告</h1>
+{% if not reports %}<p class="muted">尚无报告。先在首页运行一个研究意图。</p>{% endif %}
+<div class="card"><ul class="list-group list-group-flush">{% for report in reports %}
+<li class="list-group-item"><a href="/reports/{{ report.id }}">报告 #{{ report.id }}</a> · 意图 #{{ report.intent_id }} · {{ report.status }}<br><span class="muted">候选 {{ report.candidate_count }} · 保留 {{ report.title_kept_count }} · 分析 {{ report.abstract_candidate_count }}</span></li>
+{% endfor %}</ul></div>
+{% endblock %}

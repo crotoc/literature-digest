@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}报告 #{{ report.id }} · literature-digest{% endblock %}
+{% block content %}
+<p><a href="/reports">← 报告列表</a></p><h1>报告 #{{ report.id }}</h1>
+<p class="muted">候选 {{ report.candidate_count }} · 标题筛选 {{ report.title_screen_status }} · 摘要分析 {{ report.analysis_status }}</p>
+<div class="card mb-3"><div class="card-header"><strong>条目</strong></div><ul class="list-group list-group-flush">{% for item in items %}<li class="list-group-item"><strong>{{ item.title or '（无标题）' }}</strong><br><span class="muted">标题：{{ item.title_screen_status }} · 分析：{{ item.analysis_status }}{% if item.recommend %} · 推荐{% endif %}</span>{% if item.analysis_reason %}<p class="mb-0">{{ item.analysis_reason }}</p>{% endif %}</li>{% endfor %}</ul></div>
+<div class="card"><div class="card-header"><strong>投递记录</strong></div><ul class="list-group list-group-flush">{% for delivery in deliveries %}<li class="list-group-item">目的地 #{{ delivery.connection_id }} · {{ delivery.status }}{% if delivery.error %}：{{ delivery.error }}{% endif %}</li>{% endfor %}</ul></div>
+{% endblock %}
