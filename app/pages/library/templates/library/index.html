@@ -141,70 +141,79 @@
 
   {% if library_page.items %}
     <form id="batch-form" method="post" action="/l/{{ slug_and_id }}/batch" class="batch-bar card p-2 mb-3">
+    <form id="batch-form" method="post" action="/l/{{ slug_and_id }}/batch" class="batch-bar card p-3 mb-3">
       {{ hidden_state() }}
       <input type="hidden" name="selection_mode" value="explicit" id="batch-selection-mode">
       {% for tid in tag_ids %}<input type="hidden" name="tag_ids" value="{{ tid }}">{% endfor %}
       <input type="hidden" name="folder_id" value="{{ folder_id or '' }}">
-      <span class="batch-bar-picks">
-        <a href="#" onclick="document.querySelectorAll('.work-select').forEach(function(c){c.checked=true}); __setSelectionMode('explicit'); return false;">全选本页</a>
-        <a href="#" onclick="document.querySelectorAll('.work-select').forEach(function(c){c.checked=false}); __setSelectionMode('explicit'); return false;">清除</a>
-        <a href="#" onclick="__setSelectionMode('all_filtered'); return false;"
-           title="操作会作用于当前筛选条件下的全部 {{ library_page.total }} 篇，不限于本页勾选">
-          全选所有筛选结果（共 {{ library_page.total }} 篇）
-        </a>
-      </span>
-      <select name="target_tag_id" class="form-select form-select-sm">
-        <option value="">选标签……</option>
-        {% for tag in all_tags %}
-          <option value="{{ tag.id }}">{{ tag.name }}</option>
-        {% endfor %}
-      </select>
-      <button type="submit" name="action" value="add_tag" class="btn btn-sm">批量打标签</button>
-      <button type="submit" name="action" value="remove_tag" class="btn btn-sm">批量去标签</button>
-      <select name="target_folder_id" class="form-select form-select-sm">
-        <option value="">选文件夹……</option>
-        {% for folder in folders %}
-          <option value="{{ folder.id }}">{{ folder.name }}</option>
-        {% endfor %}
-      </select>
-      <button type="submit" name="action" value="add_folder" class="btn btn-sm">批量加入文件夹</button>
-      <button type="submit" name="action" value="remove_folder" class="btn btn-sm">批量移出文件夹</button>
-      {% if view == "all" %}
-        <button type="submit" name="action" value="ai_assess" class="btn btn-sm">AI 点评所选</button>
-      {% endif %}
-      {% if view == "trash" %}
-        <button type="submit" name="action" value="restore" class="btn btn-sm">批量恢复</button>
-        <label class="batch-confirm-purge">
-          <input type="checkbox" name="confirm_purge" value="true"> 确认彻底删除（不可撤销）
-        </label>
-        <button type="submit" name="action" value="purge" class="btn btn-sm btn-outline-danger">批量彻底删除</button>
-      {% else %}
-        <button type="submit" name="action" value="delete" class="btn btn-sm">批量移入回收站</button>
-      {% endif %}
-      <select name="format" class="form-select form-select-sm">
-        <option value="ris">RIS</option>
-        <option value="bibtex">BibTeX</option>
-        <option value="csljson">CSL-JSON</option>
-      </select>
-      <label class="export-with-attachments">
-        <input type="checkbox" name="with_attachments" value="true"> 含附件
-      </label>
-      <button type="submit" formaction="/l/{{ slug_and_id }}/export-selection" class="btn btn-sm">导出选中/筛选结果</button>
-      <button type="submit" name="cite_format" value="keys"
-              formaction="/l/{{ slug_and_id }}/cite-selection" class="btn btn-sm">复制 Citation Key</button>
-      <button type="submit" name="cite_format" value="latex"
-              formaction="/l/{{ slug_and_id }}/cite-selection" class="btn btn-sm">复制 LaTeX \cite{}</button>
-    </form>
-  {% endif %}
+      
+      <!-- 选择操作 -->
+      <div class="batch-section batch-selection mb-3">
+        <span class="batch-bar-picks">
+          <a href="#" onclick="document.querySelectorAll('.work-select').forEach(function(c){c.checked=true}); __setSelectionMode('explicit'); return false;">全选本页</a> ·
+          <a href="#" onclick="document.querySelectorAll('.work-select').forEach(function(c){c.checked=false}); __setSelectionMode('explicit'); return false;">清除</a> ·
+          <a href="#" onclick="__setSelectionMode('all_filtered'); return false;" title="操作会作用于当前筛选条件下的全部 {{ library_page.total }} 篇，不限于本页勾选">全选所有筛选结果（共 {{ library_page.total }} 篇）</a>
+        </span>
+      </div>
 
-  {% if library_page.items %}
-  <div class="card">
-    <ul class="work-list list-group list-group-flush">
-      {% for card in library_page.items %}
-        <li class="work-card list-group-item">
-          <div class="work-item-main">
-            <input type="checkbox" class="work-select form-check-input mt-1" name="work_ids" value="{{ card.work.id }}" form="batch-form">
-            <div class="work-item-body">
+      <!-- 标签操作组 -->
+      <fieldset class="batch-group mb-3">
+        <legend class="form-label fw-bold">标签操作</legend>
+        <div class="d-flex gap-2 flex-wrap">
+          <select name="target_tag_id" class="form-select form-select-sm" style="flex: 0 1 auto; min-width: 120px;">
+            <option value="">选标签……</option>
+            {% for tag in all_tags %}<option value="{{ tag.id }}">{{ tag.name }}</option>{% endfor %}
+          </select>
+          <button type="submit" name="action" value="add_tag" class="btn btn-sm btn-outline-secondary">批量打标签</button>
+          <button type="submit" name="action" value="remove_tag" class="btn btn-sm btn-outline-secondary">批量去标签</button>
+        </div>
+      </fieldset>
+
+      <!-- 文件夹操作组 -->
+      <fieldset class="batch-group mb-3">
+        <legend class="form-label fw-bold">文件夹操作</legend>
+        <div class="d-flex gap-2 flex-wrap">
+          <select name="target_folder_id" class="form-select form-select-sm" style="flex: 0 1 auto; min-width: 120px;">
+            <option value="">选文件夹……</option>
+            {% for folder in folders %}<option value="{{ folder.id }}">{{ folder.name }}</option>{% endfor %}
+          </select>
+          <button type="submit" name="action" value="add_folder" class="btn btn-sm btn-outline-secondary">批量加入文件夹</button>
+          <button type="submit" name="action" value="remove_folder" class="btn btn-sm btn-outline-secondary">批量移出文件夹</button>
+        </div>
+      </fieldset>
+
+      <!-- 更多操作（折叠） -->
+      <details class="batch-group mb-3">
+        <summary class="form-label fw-bold" style="cursor: pointer;">更多操作</summary>
+        <div class="mt-2 pt-2 border-top">
+          {% if view == "all" %}
+            <button type="submit" name="action" value="ai_assess" class="btn btn-sm btn-outline-secondary me-2">AI 点评所选</button>
+            <button type="submit" name="action" value="delete" class="btn btn-sm btn-outline-secondary">批量移入回收站</button>
+          {% endif %}
+          {% if view == "trash" %}
+            <button type="submit" name="action" value="restore" class="btn btn-sm btn-outline-secondary me-2">批量恢复</button>
+            <label class="batch-confirm-purge d-inline-block me-2"><input type="checkbox" name="confirm_purge" value="true"> 确认彻底删除（不可撤销）</label>
+            <button type="submit" name="action" value="purge" class="btn btn-sm btn-outline-danger">批量彻底删除</button>
+          {% endif %}
+        </div>
+      </details>
+
+      <!-- 导出/引用操作组 -->
+      <fieldset class="batch-group">
+        <legend class="form-label fw-bold">导出/引用</legend>
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+          <select name="format" class="form-select form-select-sm" style="flex: 0 1 auto; min-width: 100px;">
+            <option value="ris">RIS</option>
+            <option value="bibtex">BibTeX</option>
+            <option value="csljson">CSL-JSON</option>
+          </select>
+          <label class="export-with-attachments d-flex align-items-center gap-2 mb-0"><input type="checkbox" name="with_attachments" value="true"> 含附件</label>
+          <button type="submit" formaction="/l/{{ slug_and_id }}/export-selection" class="btn btn-sm btn-outline-secondary">导出选中/筛选结果</button>
+          <button type="submit" name="cite_format" value="keys" formaction="/l/{{ slug_and_id }}/cite-selection" class="btn btn-sm btn-outline-secondary">复制 Citation Key</button>
+          <button type="submit" name="cite_format" value="latex" formaction="/l/{{ slug_and_id }}/cite-selection" class="btn btn-sm btn-outline-secondary">复制 LaTeX cite</button>
+        </div>
+      </fieldset>
+    </form>
               <h3 class="mb-1">{{ card.work.title or "（无标题）" }}</h3>
               <p class="work-meta muted mb-1">
                 {% for author in card.work.authors %}{{ author.literal or ((author.family or "") ~ (" " ~ author.given if author.given else "")) }}{% if not loop.last %}; {% endif %}{% endfor %}
