@@ -27,7 +27,8 @@ def test_create_trace(db_session: Session):
         source_url="https://example.com/paper.pdf",
     )
     assert trace.id
-    assert trace.account_id == 1
+    assert trace.work_id == 1
+    assert trace.source_url == "https://example.com/paper.pdf"
 
 
 def test_add_step(db_session: Session):
@@ -40,13 +41,17 @@ def test_add_step(db_session: Session):
         job_id=1,
         source_url="https://example.com/paper.pdf",
     )
-    step = add_step(
+    # add_step 返回 None，只是记录，之后查询验证
+    add_step(
         db_session,
         trace_id=trace.id,
         step_type="observation",
         observation={"url": "https://example.com", "has_captcha": False},
     )
-    assert step.trace_id == trace.id
+    # 查询验证步骤被记录
+    retrieved = get_trace(db_session, trace.id)
+    assert len(retrieved.steps) == 1
+    assert retrieved.steps[0].step_type == "observation"
 
 
 def test_finalize_and_get(db_session: Session):
@@ -59,11 +64,11 @@ def test_finalize_and_get(db_session: Session):
         job_id=1,
         source_url="https://example.com/paper.pdf",
     )
-    finalize_trace(db_session, trace.id, success=True)
+    finalize_trace(db_session, trace.id, final_status="success")
 
     retrieved = get_trace(db_session, trace.id)
     assert retrieved.id == trace.id
-    assert retrieved.success is True
+    assert retrieved.final_status == "success"
 
 
 def test_list_traces_for_work(db_session: Session):
