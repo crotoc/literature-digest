@@ -335,6 +335,13 @@
                   {{ hidden_state() }}
                   <input type="file" class="form-control form-control-sm" name="files" webkitdirectory multiple required>
                   <button type="submit" class="btn btn-sm">整目录上传</button>
+                <form method="post" class="fulltext-form"
+                      action="/l/{{ slug_and_id }}/works/{{ card.work.id }}/fulltext/initiate">
+                  {{ hidden_state() }}
+                  <input type="text" class="form-control form-control-sm" name="source_url" 
+                         placeholder="下载来源 URL" required>
+                  <button type="submit" class="btn btn-sm">下载全文</button>
+                </form>
                 </form>
               </details>
               {% if view == 'all' %}
