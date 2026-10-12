@@ -1470,3 +1470,39 @@ def batch_action_route(
             error=f"批量操作完成：{done} 篇成功，{failed} 篇失败",
         )
     return _back_to_list(slug_and_id, view=view, sort_by=sort_by, sort_dir=sort_dir, page=page)
+
+
+@router.post("/l/{slug_and_id}/works/{work_id}/fulltext/initiate")
+def initiate_fulltext_download_route(
+    slug_and_id: str,
+    work_id: int,
+    source_url: str = Form(...),
+    session: Session = Depends(db),
+    account: AccountDTO = Depends(current_account),
+) -> RedirectResponse:
+    """启动全文下载任务。"""
+    library_id = _parse_library_id(slug_and_id)
+    
+    try:
+        work = get_work(session, work_id)
+        if work.library_id != library_id:
+            raise HTTPException(status_code=403, detail="access denied")
+    except WorkNotFound:
+        raise HTTPException(status_code=404, detail="work not found")
+    
+    from features.fulltext.service import initiate_fulltext_download as initiate_download
+    
+    try:
+        job = initiate_download(
+            session,
+            account_id=account.id,
+            library_id=library_id,
+            work_id=work_id,
+            source_url=source_url,
+        )
+        return RedirectResponse(
+            url=f"/l/{slug_and_id}/works/{work_id}?job_id={job.id}",
+            status_code=303,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
