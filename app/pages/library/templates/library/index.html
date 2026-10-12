@@ -140,7 +140,6 @@
   {% endif %}
 
   {% if library_page.items %}
-    <form id="batch-form" method="post" action="/l/{{ slug_and_id }}/batch" class="batch-bar card p-2 mb-3">
     <form id="batch-form" method="post" action="/l/{{ slug_and_id }}/batch" class="batch-bar card p-3 mb-3">
       {{ hidden_state() }}
       <input type="hidden" name="selection_mode" value="explicit" id="batch-selection-mode">
