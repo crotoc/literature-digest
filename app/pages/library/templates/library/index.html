@@ -213,6 +213,16 @@
         </div>
       </fieldset>
     </form>
+  {% endif %}
+
+  {% if library_page.items %}
+  <div class="card">
+    <ul class="work-list list-group list-group-flush">
+      {% for card in library_page.items %}
+        <li class="work-card list-group-item">
+          <div class="work-item-main">
+            <input type="checkbox" class="work-select form-check-input mt-1" name="work_ids" value="{{ card.work.id }}" form="batch-form">
+            <div class="work-item-body">
               <h3 class="mb-1">{{ card.work.title or "（无标题）" }}</h3>
               <p class="work-meta muted mb-1">
                 {% for author in card.work.authors %}{{ author.literal or ((author.family or "") ~ (" " ~ author.given if author.given else "")) }}{% if not loop.last %}; {% endif %}{% endfor %}
